@@ -1,0 +1,8 @@
+results/
+probe/
+reference/*.cif
+reference/*.pdb
+inputs/
+__pycache__/
+*.pyc
+_selftest/

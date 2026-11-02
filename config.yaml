@@ -1,0 +1,100 @@
+# CCTX2 project configuration.
+#
+# EVERYTHING in this file must be checked against the paper and 9S11 before
+# the first production run. The domain boundaries below are PLACEHOLDERS.
+#
+# To get the real ones:
+#   1. Download 9S11 from the PDB.
+#   2. Read the domain definitions off Figure 1A / the methods of
+#      Schmieder et al. EMBO J 2026 (doi 10.1038/s44318-026-00812-1).
+#   3. Cross-check against the deposited SEQRES numbering, which may differ
+#      from the UniProt numbering of A8NDT7.
+#
+# Residue numbers are inclusive, 1-based, in the numbering of your FASTA.
+
+target:
+  name: CCTX2
+  uniprot: A8NDT7
+  fasta: sequences/cctx2.fasta       # you provide this
+  reference_pdb: reference/9s11.cif  # you provide this
+  reference_chain: A
+
+# PLACEHOLDER BOUNDARIES - replace before use.
+domains:
+  BTF1: [1, 150]
+  BTF2: [151, 300]
+  BTF3: [301, 450]
+  BTF4: [451, 600]
+  DUF:  [601, 803]
+
+# Residues deposited but not modelled in 9S11: the His8 tag and TEV site at
+# the N-terminus (ATOM records run 17 to 803). The native sequence is fully
+# modelled, so there are no disordered native residues to test against.
+unmodelled_in_reference: [1, 16]
+
+# What the reference actually is, and what that means for the comparison:
+#   - cryo-EM model fitted into a 3.16 A map, not a direct observation
+#   - PDB deposition records "Starting Model: in silico", so model building
+#     began from a computational prediction refined against the map. Where
+#     density is weak, features of that starting model may persist.
+#   - side chains are not reliably resolved at this resolution: compare
+#     backbone (CA) only, and do not report all-atom lDDT as if it were
+#     meaningful here
+#   - no carbohydrates are deposited, so the ligand runs have no coordinate
+#     ground truth. Use EMD-54430 or the residues named in the paper.
+
+# Constructs to predict. Each becomes one or more Boltz-2 jobs.
+#   full      : whole chain, the calibration case
+#   duf_alone : the cleaved-state question
+#   btf12     : do the sugar sites survive separation
+#   delta_n   : matches the CCTX2dN variant in the paper
+#   delta_c   : matches the CCTX2dC variant in the paper
+constructs:
+  full:
+    regions: [[1, 803]]
+    note: "Calibration against 9S11"
+  duf_alone:
+    regions: [[601, 803]]
+    note: "Predicted cleaved state. No experimental ground truth."
+  btf12:
+    regions: [[1, 300]]
+    note: "Sugar-binding module in isolation"
+  delta_n:
+    regions: [[301, 803]]
+    note: "Matches CCTX2dN; abolishes toxicity in the paper"
+  delta_c:
+    regions: [[1, 600]]
+    note: "Matches CCTX2dC; abolishes toxicity in the paper"
+
+# Ligands for co-folding. SMILES must be checked before use.
+# Positives are the epitopes reported to bind; negatives are controls that
+# should NOT bind according to the glycan array.
+ligands:
+  lacnac:
+    smiles: "PLACEHOLDER_CHECK_THIS"
+    class: positive
+    note: "Gal-beta1,4-GlcNAc"
+  lacdinac:
+    smiles: "PLACEHOLDER_CHECK_THIS"
+    class: positive
+    note: "GalNAc-beta1,4-GlcNAc"
+  negative_control:
+    smiles: "PLACEHOLDER_CHECK_THIS"
+    class: negative
+    note: "Pick a glycan the array shows as non-binding"
+
+run:
+  seeds: 5
+  diffusion_samples: 5
+  recycling_steps: 6
+  use_msa_server: false   # see README; set true only after the data question
+                          # with Ute is settled and compute nodes can reach it
+
+slurm:
+  account: ecXXX          # check with `projects`
+  partition: accel        # check with `sinfo`
+  gpus: 1
+  cpus_per_task: 8
+  mem: 64G
+  time: "04:00:00"
+  boltz_cache: /projects/ecXXX/boltz_cache
