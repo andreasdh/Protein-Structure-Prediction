@@ -1,86 +1,143 @@
-# Å gi containeren til studenten
+# Handing a container to collaborators
 
-## Du gjør dette én gang
+Once an image exists, the people who use it should not have to think about it.
+This describes how to distribute one, how to make it invisible in daily work,
+and the one trap worth avoiding.
 
-1. Legg `container/` og `.github/workflows/container.yml` i repoet.
-2. `git tag v1 && git push origin v1`
-3. Vent på at Actions blir grønn.
-4. Gjør pakken offentlig under Packages på GitHub, eller gi studenten et
-   token.
-5. På Fox, hent den ned én gang til et sted dere begge når:
+## Distributing the image
 
-```bash
-mkdir -p $HOME/images
-apptainer pull $HOME/images/boltz.sif docker://ghcr.io/<eier>/<repo>/boltz:v1
-```
+An image is a single file, so there are three routes. Pick by how much you
+trust the network and how many people are involved.
 
-Imaget er en vanlig fil. Studenten kan kopiere den, eller hente sin egen med
-samme kommando.
-
-## Hva studenten må vite
-
-Dette:
+**Pull from a registry.** Each person runs one command:
 
 ```bash
-./boltz_run.sh predict inputs/full.yaml --out_dir results/ --seed 1
+apptainer pull $HOME/images/<name>.sif \
+    docker://ghcr.io/<owner>/<repo>/<name>:v1
 ```
 
-Og ingenting mer. Scriptet finner imaget hvis det finnes, og faller tilbake
-på pip-miljøet hvis ikke. Kommandoen er identisk begge veier, og scriptet
-skriver ut hvilken det brukte.
+Best when the package is public, or when everyone has a token. The version tag
+in that command is the version they ran, which makes it self-documenting.
 
-Han trenger ikke lære Apptainer for å jobbe i prosjektet. Han bør lære det
-før han skriver metodedelen, men det er et annet tidspunkt.
-
-## Kan han vente med containeren til slutt?
-
-Ja, men ikke uten å ta en forholdsregel.
-
-Problemet med å bytte til slutt er at pip-miljøet og containeren kan være
-ulike. Da dokumenterer containeren et miljø som ikke produserte resultatene,
-og det er verre enn ingen container.
-
-Tre ting fjerner problemet:
-
-**Frys pip-miljøet mot imaget.** Ett oppslag:
+**Copy the file.** Build once, then:
 
 ```bash
-apptainer exec $HOME/images/boltz.sif cat /opt/versions.txt > container_versions.txt
-pip list --format=freeze > venv_versions.txt
-diff <(sort container_versions.txt) <(sort venv_versions.txt)
+scp <name>.sif user@cluster:~/images/
 ```
 
-Er diffen tom for de pakkene som betyr noe, altså boltz, torch og
-cuequivariance, er de to miljøene samme stack. Da er det likegyldig hvilket
-som kjørte hva.
+Works when the registry is unreachable or the package must stay private.
+Nobody needs registry credentials. The cost is that a copied file carries no
+record of where it came from, so note the tag and digest alongside it.
 
-**Kjør én sammenligning.** Samme input, samme seed, begge veier:
+**Put it on shared storage.** One copy in a project directory everyone can
+read:
 
 ```bash
-BOLTZ_IMAGE=/dev/null ./boltz_run.sh predict inputs/full.yaml \
-    --out_dir cmp_venv/ --seed 1 --diffusion_samples 1
-./boltz_run.sh predict inputs/full.yaml \
-    --out_dir cmp_container/ --seed 1 --diffusion_samples 1
+/projects/<project>/images/<name>-v1.sif
 ```
 
-Så `compare.py` mellom de to. Legg tallet i loggboka. Det er en billig
-forsikring, og det er noe en fagfelle vil spørre om.
+Best for a group. Keep the version in the filename and never overwrite an
+existing file. Someone's run that silently changes software underneath it is a
+reproducibility failure that is very hard to diagnose afterwards.
 
-Merk at identiske tall ikke er å forvente uansett. GPU-beregninger er ikke
-bitreproduserbare på tvers av kort og drivere. Det du ser etter er at
-strukturene er praktisk talt like, ikke at filene er identiske.
+## Making it invisible
 
-**Bruk containeren for alt som skal rapporteres.** Utforskning i pip er
-greit. Enhver kjøring som gir et tall i rapporten bør gå gjennom imaget, og
-`provenance.sh` fanger hvilket image det var.
+Nobody should have to remember Apptainer syntax to do their work. A small
+wrapper hides it:
 
-## Min anbefaling
+```bash
+#!/bin/bash
+set -euo pipefail
 
-Bygg imaget nå, mens du har hodet i det. Det koster deg et kvarter.
+IMAGE="${IMAGE:-$HOME/images/<name>.sif}"
+VENV="${VENV:-$HOME/envs/<name>}"
 
-La studenten bruke `boltz_run.sh` fra første dag. Da får han containeren
-gratis uten å tenke på den, og dere unngår hele spørsmålet om å bytte
-underveis.
+if [ -f "$IMAGE" ]; then
+    echo "[run] container: $IMAGE" >&2
+    exec apptainer exec --nv "$IMAGE" <command> "$@"
+else
+    echo "[run] local environment: $VENV" >&2
+    echo "[run] NOTE: not the frozen image." >&2
+    source "$VENV/bin/activate"
+    exec <command> "$@"
+fi
+```
 
-Det eneste tidspunktet å unngå er å bygge imaget *etter* at resultatene er
-produsert. Da dokumenterer det noe annet enn det som faktisk skjedde.
+Everyone then runs the same line whether or not the image is present:
+
+```bash
+./run.sh --some-argument
+```
+
+Two properties make this worth the twenty lines. The command is identical
+either way, so switching is a setting rather than a different way of working.
+And the script announces which path it took, so the choice ends up in the log
+rather than in someone's memory.
+
+## The trap: switching late
+
+The tempting plan is to develop in a quick local environment and switch to the
+container at the end, for the paper.
+
+This goes wrong when the two are not the same software. The image then
+documents an environment that did not produce the results, which is worse than
+having no image at all, because it looks authoritative.
+
+Three measures remove the problem.
+
+**Freeze the local environment against the image.** One comparison:
+
+```bash
+apptainer exec image.sif cat /opt/versions.txt > image_versions.txt
+pip list --format=freeze > local_versions.txt
+diff <(sort image_versions.txt) <(sort local_versions.txt)
+```
+
+If the packages that matter agree, the two are the same stack and it does not
+matter which ran what.
+
+**Run one input both ways.** Same input, same seed, once in each environment,
+then compare the outputs. Put the number in the logbook. It is cheap insurance
+and it is something a reviewer may ask about.
+
+Do not expect identical files. GPU computation is not bit-reproducible across
+card models and driver versions, so what you are checking is that the results
+agree to within the noise you would see anyway, not that the bytes match.
+
+**Use the image for anything reported.** Exploration in a local environment is
+fine. Any run that produces a number in the write-up should go through the
+image, and whatever records provenance should capture which image it was.
+
+## Timing
+
+Build the image early, while the setup is fresh in your mind, and let people
+use the wrapper from the first day. Then the container costs them nothing and
+the question of switching never arises.
+
+The only moment to avoid is building the image after the results exist.
+
+## What collaborators need to know
+
+In most cases, one line:
+
+```bash
+./run.sh <arguments>
+```
+
+They should learn what the container is before writing a methods section, but
+that is a later conversation. It does not need to block anyone from starting.
+
+## What to record
+
+Whenever a run produces a number that will be reported:
+
+| Item | Where it comes from |
+| --- | --- |
+| Image tag | the pull command, or the filename |
+| Image digest | `sha256:...`, from the build log or `apptainer inspect` |
+| Commit of the code | `git rev-parse HEAD` |
+| Version list | `apptainer exec image.sif cat /opt/versions.txt` |
+| Host GPU and driver | `nvidia-smi` |
+
+That set is enough for someone else to reconstruct the run, and it is what a
+methods section needs.
