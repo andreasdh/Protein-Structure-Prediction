@@ -5,7 +5,7 @@
 #
 #     apptainer pull boltz.sif docker://ghcr.io/<owner>/<repo>/boltz:v2
 #
-# BASE IMAGE, and why it is this one:
+# BASE IMAGE:
 # Ubuntu 22.04 ships python3.11 as 3.11.0~rc1, a release candidate predating
 # sys.get_int_max_str_digits. Recent PyTorch calls that at import time, so a
 # 22.04 base fails with:
@@ -13,7 +13,7 @@
 # Ubuntu 24.04 ships a real Python 3.12.3, the same version known to work in
 # the pip environment on Fox.
 #
-# VIRTUAL ENVIRONMENT, and why:
+# VIRTUAL ENVIRONMENT:
 # Ubuntu 24.04 marks its system Python as externally managed (PEP 668). Pip
 # refuses to touch it, and forcing it fails anyway, because Ubuntu's own pip
 # was installed by dpkg and carries no RECORD file for pip to uninstall:
@@ -86,5 +86,9 @@ RUN pip list --format=freeze > /opt/versions.txt \
         print('torch', torch.__version__)" >> /opt/versions.txt \
     && echo "cuda_base nvidia/cuda:13.3.1-cudnn-runtime-ubuntu24.04" >> /opt/versions.txt
 
+RUN wget -q https://zhanggroup.org/US-align/bin/module/USalign.cpp -O /tmp/USalign.cpp \
+    && g++ -O3 -ffast-math -lm -o /usr/local/bin/USalign /tmp/USalign.cpp \
+    && rm /tmp/USalign.cpp
+    
 WORKDIR /work
 CMD ["boltz", "--help"]
