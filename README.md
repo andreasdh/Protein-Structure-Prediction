@@ -12,21 +12,19 @@ collect.py       Boltz output tree        ->  summary.csv   (confidence)
 compare.py       summary.csv + 9S11       ->  comparison.csv (accuracy)
 ```
 
-`selftest.py` builds a fake output tree and runs all four, so you can see the
-tables before you have any real results. Run it first.
+`selftest.py` builds a fake output tree and runs all four scripts, so you can see the
+tables before you have any real results.
 
 ## Setup
 
 ```bash
 pip install numpy pandas pyyaml
-python3 selftest.py          # verify the pipeline works
+python3 selftest.py          # verify that the pipeline works
 ```
 
-Optional but recommended: put **US-align** on PATH for TM-score. Without it the
-scripts still compute RMSD and CA-lDDT, which cover most of what you need.
+Optional but recommended: put **US-align** on PATH for TM-score. US-align is a program developed by the Zhang lab. Without it the scripts still compute RMSD and CA-lDDT, which cover most of what you need.
 
-For anything going into a paper, use **OpenStructure** for lDDT rather than the
-CA-only version implemented here.
+For anything going into a project report, use **OpenStructure** for lDDT rather than the CA-only version implemented here.
 
 ## Before the first real run
 
@@ -34,13 +32,10 @@ Three things in `config.yaml` are placeholders and will give wrong answers if
 left as they are.
 
 **Domain boundaries.** The ranges under `domains:` are invented. Read the real
-ones off Figure 1A and the methods of Schmieder et al. EMBO J 2026, and check
-them against the residue numbering actually used in 9S11, which may not match
-UniProt A8NDT7.
+ones off Figure 1A and the methods of Schmieder et al. EMBO J 2026.
 
 **Ligand SMILES.** The LacNAc and LacdiNAc entries say `PLACEHOLDER`. Fill them
-in and check them. Pick the negative control from a glycan the published array
-shows as non-binding.
+in and check them.
 
 **Slurm account and partition.** Run `projects` and `sinfo` on Fox rather than
 trusting the defaults.
