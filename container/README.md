@@ -56,7 +56,7 @@ apptainer --version
 
 **Building** one needs root or fakeroot. You have neither on a cluster.
 
-**And Apptainer does not run on macOS.** So your Mac is not an option either.
+**Apptainer does not run on macOS.** So a Mac is not an option either.
 You can install Docker Desktop and build a Docker image there, but then you
 need Docker running locally and you upload several gigabytes over your own
 connection.
