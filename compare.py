@@ -196,18 +196,50 @@ def us_align(model, ref, chain_m=None, chain_r=None):
 
 # ---------------------------------------------------------------- correspond
 
-def align_by_resnum(nums_a, xyz_a, nums_b, xyz_b, offset=0):
-    """Match residues by number, applying offset to the first set."""
+def align_by_resnum(nums_a, xyz_a, nums_b, xyz_b, offset=0, exclude=None):
+    """Match residues by number, applying offset to the first set.
+
+    exclude is a set of residue numbers IN THE REFERENCE NUMBERING to leave
+    out of the comparison. Use it for regions where the reference itself is
+    unreliable: predict the whole protein, but do not score it against
+    coordinates that are poorly determined.
+
+    Returns (xyz_a_sel, xyz_b_sel, keys) where keys are the matched residue
+    numbers in the reference numbering, so callers can map results back.
+    """
+    exclude = exclude or set()
     idx_b = {int(n): i for i, n in enumerate(nums_b)}
-    ia, ib = [], []
+    ia, ib, keys = [], [], []
     for i, n in enumerate(nums_a):
         key = int(n) + offset
-        if key in idx_b:
+        if key in idx_b and key not in exclude:
             ia.append(i)
             ib.append(idx_b[key])
+            keys.append(key)
     if not ia:
-        return None, None
-    return xyz_a[ia], xyz_b[ib]
+        return None, None, None
+    return xyz_a[ia], xyz_b[ib], keys
+
+
+def excluded_residues(cfg):
+    """Residue numbers to leave out of the comparison, from config.yaml.
+
+    Expects, in reference (PDB) numbering:
+
+        exclude_from_comparison:
+          - [31, 35]
+          - [40, 45]
+
+    Returns an empty set when the key is absent, so the default is to
+    compare everything.
+    """
+    if not cfg:
+        return set()
+    out = set()
+    for entry in cfg.get("exclude_from_comparison", []) or []:
+        start, stop = int(entry[0]), int(entry[1])
+        out.update(range(start, stop + 1))
+    return out
 
 
 def construct_offset(cfg, construct):
@@ -236,6 +268,10 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
     print(f"reference: {len(rx)} CA atoms, residues {rn.min()}-{rn.max()}")
 
     doms = (cfg or {}).get("domains", {})
+    skip = excluded_residues(cfg)
+    if skip:
+        print(f"excluding {len(skip)} residues from the comparison "
+              f"(exclude_from_comparison in the config)")
     rows, calib_rows = [], []
 
     for _, r in df.iterrows():
@@ -249,7 +285,8 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
         off = construct_offset(cfg, r["construct"])
         if off is None:
             continue
-        A, B = align_by_resnum(mn, mx, rn, rx, offset=off)
+        A, B, matched_global = align_by_resnum(mn, mx, rn, rx, offset=off,
+                                               exclude=skip)
         if A is None or len(A) < 10:
             continue
 
@@ -259,6 +296,7 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
             "construct": r["construct"], "ligand": r.get("ligand", "none"),
             "seed": r.get("seed"), "model": r.get("model"),
             "n_matched": len(A),
+            "n_excluded": len(skip),
             "rmsd_global": round(rmsd, 2),
             "lddt_global": round(float(np.nanmean(per_res)), 4),
         }
@@ -270,8 +308,6 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
         # superposition of that domain alone. A big gap between a domain's
         # own RMSD and the global RMSD means the fold is right but the
         # placement is wrong.
-        matched_global = [int(n) + off for n in mn
-                          if int(n) + off in set(int(x) for x in rn)]
         for name, (ds, de) in doms.items():
             sel = [i for i, g in enumerate(matched_global) if ds <= g <= de]
             if len(sel) < 10:
@@ -284,20 +320,22 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
         rows.append(row)
 
         if calib_path and len(mb) == len(mn):
-            keep = {int(n) + off for n in mn} & {int(x) for x in rn}
-            k = 0
-            for i, n in enumerate(mn):
-                if int(n) + off in keep:
-                    g = int(n) + off
-                    dom = next((nm for nm, (a, b) in doms.items()
-                                if a <= g <= b), "")
-                    calib_rows.append({
-                        "construct": r["construct"], "seed": r.get("seed"),
-                        "model": r.get("model"), "resnum_global": g,
-                        "domain": dom, "plddt": float(mb[i]),
-                        "lddt": float(per_res[k]),
-                    })
-                    k += 1
+            # matched_global and per_res share an index, and both already
+            # have the excluded residues removed. Map each back to the
+            # model's own B-factor column, which carries pLDDT.
+            plddt_by_global = {int(n) + off: float(mb[i])
+                               for i, n in enumerate(mn)}
+            for k, g in enumerate(matched_global):
+                if g not in plddt_by_global:
+                    continue
+                dom = next((nm for nm, (a, b) in doms.items()
+                            if a <= g <= b), "")
+                calib_rows.append({
+                    "construct": r["construct"], "seed": r.get("seed"),
+                    "model": r.get("model"), "resnum_global": g,
+                    "domain": dom, "plddt": plddt_by_global[g],
+                    "lddt": float(per_res[k]),
+                })
 
     out = pd.DataFrame(rows)
     if calib_path and calib_rows:
@@ -335,7 +373,7 @@ def mode_consistency(df):
             nb, xb, _ = read_ca(b)
             if xa is None or xb is None:
                 continue
-            A, B = align_by_resnum(na, xa, nb, xb)
+            A, B, _ = align_by_resnum(na, xa, nb, xb)
             if A is None or len(A) < 10:
                 continue
             rmsd, _, _ = kabsch_rmsd(A, B)

@@ -19,13 +19,38 @@ target:
   reference_pdb: reference/9s11.cif  # you provide this
   reference_chain: A
 
-# PLACEHOLDER BOUNDARIES - replace before use.
+# Domain boundaries from Schmieder et al. EMBO J 2026, Appendix Table S4,
+# converted to PDB numbering by adding 16 (the His8 tag plus TEV site).
+# The paper's own numbers are in the comments.
 domains:
-  BTF1: [1, 150]
-  BTF2: [151, 300]
-  BTF3: [301, 450]
-  BTF4: [451, 600]
-  DUF:  [601, 803]
+  BTF1: [17, 166]     # paper 1-150
+  BTF2: [173, 310]    # paper 157-294
+  BTF3: [317, 452]    # paper 301-436
+  BTF4: [460, 570]    # paper 444-554
+  DUF:  [573, 803]    # paper 557-787
+# The gaps are inter-domain linkers.
+
+# Regions where the REFERENCE is unreliable, so they are left out of the
+# comparison. These are the poorly resolved parts of the cryo-EM map, from
+# Appendix Table S3, again converted to PDB numbering.
+#
+# The prediction still covers the whole protein. Removing residues from the
+# input would change the structure, since neighbouring residues depend on
+# each other. This only affects scoring.
+#
+# Report results both with and without this list: the difference is itself
+# informative, and a reader will want to know it was not cherry-picked.
+exclude_from_comparison:
+  - [31, 35]      # paper 15-19,   BTF1 loop at sugar site alpha1
+  - [40, 45]      # paper 24-29,   BTF1 loop supporting sugar site gamma1
+  - [371, 376]    # paper 355-360, BTF3 surface loop
+  - [474, 482]    # paper 458-466, BTF4 surface loop
+  - [538, 545]    # paper 522-529, BTF4 surface loop
+  - [547, 564]    # paper 531-548, BTF4 loop at sugar site gamma4
+  - [594, 605]    # paper 578-589, DUF strand-2 to helix-1
+  - [619, 628]    # paper 603-612, DUF helix-1 to helix-2
+  - [692, 699]    # paper 676-683, DUF helix-4 to strand-4
+  - [772, 786]    # paper 756-770, DUF strand-7 to helix-6
 
 # Residues deposited but not modelled in 9S11: the His8 tag and TEV site at
 # the N-terminus (ATOM records run 17 to 803). The native sequence is fully
