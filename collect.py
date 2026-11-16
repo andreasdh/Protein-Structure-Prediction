@@ -29,7 +29,36 @@ except ImportError:
     yaml = None
 
 
-def find_models(results_dir):
+def find_models_openfold3(results_dir):
+    """Yield dicts describing OpenFold3 output. NOT YET IMPLEMENTED.
+
+    OpenFold3 writes a different file layout from Boltz, and this parser has
+    not been written against real output. Rather than guess at filenames and
+    have you debug the guesses, run one prediction and look at what it
+    produced:
+
+        find <out_dir> -type f | head -40
+
+    Then fill this function in, following find_models_boltz below. It needs
+    to yield, per predicted structure:
+
+        confidence : path to whatever holds the per-model confidence summary
+        cif        : path to the structure file
+        pae        : path to the PAE matrix, or "" if absent
+        affinity   : "" (OpenFold3 has no affinity head)
+        stem       : the job name, matching the input YAML stem
+        model      : the sample index within the job, as an int
+
+    The rest of this script, and all of compare.py, then work unchanged.
+    """
+    raise NotImplementedError(
+        "OpenFold3 output parsing is not written yet. Run one prediction, "
+        "inspect the output tree, and complete find_models_openfold3() in "
+        "collect.py. See the docstring for what it must yield."
+    )
+
+
+def find_models_boltz(results_dir):
     """Yield dicts describing every predicted model under results_dir."""
     pattern = os.path.join(results_dir, "**", "confidence_*.json")
     for conf_path in sorted(glob.glob(pattern, recursive=True)):
@@ -63,6 +92,29 @@ def find_models(results_dir):
 
         yield {"confidence": conf_path, "cif": cif, "pae": pae,
                "affinity": aff, "stem": stem, "model": model_idx}
+
+
+PARSERS = {
+    "boltz": find_models_boltz,
+    "openfold3": find_models_openfold3,
+}
+
+
+def infer_predictor(results_dir):
+    """Guess the predictor from the path, so --predictor is usually optional.
+
+    Keeping each predictor's output in its own directory (results/boltz/,
+    results/openfold3/) makes this work and keeps the two from colliding.
+    """
+    low = os.path.abspath(results_dir).lower()
+    for name in PARSERS:
+        if name in low:
+            return name
+    return "boltz"
+
+
+def find_models(results_dir, predictor):
+    yield from PARSERS[predictor](results_dir)
 
 
 def parse_seed(path):
@@ -181,6 +233,9 @@ def main():
     ap.add_argument("--results", default="results")
     ap.add_argument("--out", default="summary.csv")
     ap.add_argument("--config", default=None)
+    ap.add_argument("--predictor", default=None, choices=sorted(PARSERS),
+                    help="which tool produced this output. Inferred from the "
+                         "results path when omitted, defaulting to boltz.")
     args = ap.parse_args()
 
     cfg = None
@@ -190,13 +245,17 @@ def main():
         with open(args.config) as fh:
             cfg = yaml.safe_load(fh)
 
+    predictor = args.predictor or infer_predictor(args.results)
+    print(f"predictor: {predictor}")
+
     records = []
-    for m in find_models(args.results):
+    for m in find_models(args.results, predictor):
         with open(m["confidence"]) as fh:
             conf = json.load(fh)
 
         construct, ligand = parse_construct_ligand(m["stem"])
         rec = {
+            "predictor": predictor,
             "construct": construct,
             "ligand": ligand,
             "seed": parse_seed(m["confidence"]),
@@ -249,7 +308,8 @@ def main():
                  "Expected files named confidence_*.json.")
 
     df = pd.DataFrame(records).sort_values(
-        ["construct", "ligand", "seed", "model"]).reset_index(drop=True)
+        ["predictor", "construct", "ligand", "seed", "model"]
+    ).reset_index(drop=True)
     df.to_csv(args.out, index=False)
     print(f"wrote {args.out}: {len(df)} models")
 
@@ -257,13 +317,15 @@ def main():
             if c in df.columns]
     if cols:
         print("\nper construct (mean across seeds and samples):")
-        print(df.groupby(["construct", "ligand"])[cols].mean().round(3).to_string())
+        print(df.groupby(["predictor", "construct", "ligand"])[cols]
+              .mean().round(3).to_string())
 
     dom_cols = sorted(c for c in df.columns if c.startswith("plddt_")
                       and c not in ("plddt_mean", "plddt_frac_below_70"))
     if dom_cols:
         print("\nper-domain mean pLDDT:")
-        print(df.groupby("construct")[dom_cols].mean().round(1).to_string())
+        print(df.groupby(["predictor", "construct"])[dom_cols]
+              .mean().round(1).to_string())
 
     print("\nReminder: these are confidence numbers. They do not tell you "
           "whether a structure is correct.")

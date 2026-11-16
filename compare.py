@@ -293,6 +293,7 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
         rmsd, _, _ = kabsch_rmsd(A, B)
         per_res = ca_lddt(A, B)
         row = {
+            "predictor": r.get("predictor", "unknown"),
             "construct": r["construct"], "ligand": r.get("ligand", "none"),
             "seed": r.get("seed"), "model": r.get("model"),
             "n_matched": len(A),
@@ -331,6 +332,7 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
                 dom = next((nm for nm, (a, b) in doms.items()
                             if a <= g <= b), "")
                 calib_rows.append({
+                    "predictor": r.get("predictor", "unknown"),
                     "construct": r["construct"], "seed": r.get("seed"),
                     "model": r.get("model"), "resnum_global": g,
                     "domain": dom, "plddt": plddt_by_global[g],
@@ -363,7 +365,11 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
 
 def mode_consistency(df):
     rows = []
-    for (c, l), g in df.groupby(["construct", "ligand"]):
+    key = ["predictor", "construct", "ligand"] if "predictor" in df.columns \
+          else ["construct", "ligand"]
+    for gk, g in df.groupby(key):
+        c, l = (gk[-2], gk[-1]) if len(gk) == 3 else gk
+        pred = gk[0] if len(gk) == 3 else "unknown"
         paths = [p for p in g["cif"] if isinstance(p, str) and os.path.exists(p)]
         if len(paths) < 2:
             continue
@@ -383,7 +389,8 @@ def mode_consistency(df):
             continue
         rms = [v[0] for v in vals]
         tms = [v[1] for v in vals if v[1] is not None]
-        row = {"construct": c, "ligand": l, "n_models": len(paths),
+        row = {"predictor": pred,
+               "construct": c, "ligand": l, "n_models": len(paths),
                "n_pairs": len(vals),
                "rmsd_pairwise_mean": round(float(np.mean(rms)), 2),
                "rmsd_pairwise_max": round(float(np.max(rms)), 2)}
