@@ -12,19 +12,21 @@ collect.py       Boltz output tree        ->  summary.csv   (confidence)
 compare.py       summary.csv + 9S11       ->  comparison.csv (accuracy)
 ```
 
-`selftest.py` builds a fake output tree and runs all four scripts, so you can see the
-tables before you have any real results.
+`selftest.py` builds a fake output tree and runs all four, so you can see the
+tables before you have any real results. Run it first.
 
 ## Setup
 
 ```bash
 pip install numpy pandas pyyaml
-python3 selftest.py          # verify that the pipeline works
+python3 selftest.py          # verify the pipeline works
 ```
 
-Optional but recommended: put **US-align** on PATH for TM-score. US-align is a program developed by the Zhang lab. Without it the scripts still compute RMSD and CA-lDDT, which cover most of what you need.
+Optional but recommended: put **US-align** on PATH for TM-score. Without it the
+scripts still compute RMSD and CA-lDDT, which cover most of what you need.
 
-For anything going into a project report, use **OpenStructure** for lDDT rather than the CA-only version implemented here.
+For anything going into a paper, use **OpenStructure** for lDDT rather than the
+CA-only version implemented here.
 
 ## Before the first real run
 
@@ -32,10 +34,13 @@ Three things in `config.yaml` are placeholders and will give wrong answers if
 left as they are.
 
 **Domain boundaries.** The ranges under `domains:` are invented. Read the real
-ones off Figure 1A and the methods of Schmieder et al. EMBO J 2026.
+ones off Figure 1A and the methods of Schmieder et al. EMBO J 2026, and check
+them against the residue numbering actually used in 9S11, which may not match
+UniProt A8NDT7.
 
 **Ligand SMILES.** The LacNAc and LacdiNAc entries say `PLACEHOLDER`. Fill them
-in and check them.
+in and check them. Pick the negative control from a glycan the published array
+shows as non-binding.
 
 **Slurm account and partition.** Run `projects` and `sinfo` on Fox rather than
 trusting the defaults.
@@ -64,10 +69,63 @@ sbatch run_boltz.sh
 python3 collect.py --results results/ --out summary.csv --config config.yaml
 
 # 4. compare
+#    OpenStructure is used automatically if $OST_IMAGE is set; see below
 python3 compare.py --summary summary.csv --reference reference/9s11.cif \
     --config config.yaml --calibration calib.csv --out comparison.csv
 python3 compare.py --summary summary.csv --consistency --out consistency.csv
 ```
+
+## lDDT: two implementations
+
+`compare.py` always computes lDDT itself, on CA atoms, so it works with nothing
+installed. It additionally calls **OpenStructure**, the reference
+implementation, whenever that is available, and reports both.
+
+OpenStructure is distributed as a container. Pull it once from a login node and
+point an environment variable at it:
+
+```bash
+cd /projects/ecXXX
+apptainer pull ost.sif \
+    docker://registry.scicore.unibas.ch/schwede/openstructure:latest
+export OST_IMAGE=/projects/ecXXX/ost.sif     # or pass --ost-image
+```
+
+`compare.py` then adds these columns, and `lddt_source` records which
+implementations ran:
+
+| Column | What it is |
+|---|---|
+| `lddt_global` | CA-lDDT, computed in this script |
+| `lddt_ost_bb` | OpenStructure `--bb-lddt`, **CA only for peptides**, so the same quantity |
+| `lddt_ost_aa` | OpenStructure all-atom lDDT |
+| `lddt_ost_bb_kept` | the backbone value averaged over the residues left after `exclude_from_comparison` |
+| `lddt_ost_<domain>` | the same, per domain |
+| `ost_clashes`, `ost_bad_bonds`, `ost_bad_angles` | stereochemistry problems in the model |
+
+Three things follow from this:
+
+- `lddt_global` and `lddt_ost_bb` measure the same thing, so they should agree.
+  The script prints the mean difference across models. A systematic gap means
+  one of the two is parameterised differently, and the reference implementation
+  wins.
+- The gap between `lddt_ost_bb` and `lddt_ost_aa` is side chains. Against a
+  3.16 Å reference those are not reliably resolved, so part of that gap is our
+  own uncertainty rather than the model's error. This is why the backbone
+  number is the one to report, and why it has to be called CA-lDDT or backbone
+  lDDT rather than just lDDT.
+- With stereochecks on, which is the default and what CASP does, lDDT drops
+  residues that fail them. A large `ost_bad_bonds` count therefore means the
+  score covers fewer residues than the sequence length suggests. Use
+  `--ost-no-stereochecks` when comparing the two implementations, since the CA
+  version here filters nothing, and leave it off for numbers going in the
+  report.
+
+OpenStructure has no residue-exclusion flag, so `lddt_ost_bb_kept` is the mean
+of its per-residue values over the retained residues. That is not identical to
+a global lDDT recomputed with those residues deleted, because global lDDT pools
+all distance pairs rather than averaging per-residue scores. For exact
+comparability, trim both structures first and rerun.
 
 ## What each output answers
 

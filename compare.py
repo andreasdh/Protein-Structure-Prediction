@@ -14,17 +14,28 @@ Usage:
 
 TM-score is computed with US-align if it is on PATH. RMSD and lDDT are
 computed here, on CA atoms, so the script works with nothing installed.
-CA-lDDT is not identical to the all-atom lDDT that OpenStructure reports;
-use OpenStructure for anything going into a paper.
+
+lDDT is additionally computed with OpenStructure, the reference
+implementation, whenever that is available: `ost` on PATH, or an Apptainer
+image named by $OST_IMAGE. Both are reported, and the lddt_source column
+records which implementations ran.
+
+OpenStructure's own --bb-lddt uses CA atoms only for peptides, so it computes
+the same quantity as ca_lddt() below. The two agreeing is a check on this
+implementation; the gap between backbone and all-atom lDDT shows how much of
+the disagreement sits in side chains, which against a 3.16 A reference is
+partly our own uncertainty rather than the model's.
 """
 
 import argparse
 import itertools
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 import numpy as np
 import pandas as pd
@@ -194,6 +205,157 @@ def us_align(model, ref, chain_m=None, chain_r=None):
     return scores[0] if scores else None
 
 
+# ------------------------------------------------------------- OpenStructure
+
+def ost_command():
+    """How to invoke OpenStructure here, or None if it is not available.
+
+      1. `ost` on PATH, from a native installation
+      2. $OST_IMAGE pointing at an Apptainer or Singularity image
+
+    OpenStructure is distributed mainly as a container, so (2) is the normal
+    case on a cluster:
+
+        apptainer pull ost.sif \\
+            docker://registry.scicore.unibas.ch/schwede/openstructure:latest
+        export OST_IMAGE=$PWD/ost.sif
+
+    Apptainer binds $HOME and the current directory by default, so paths
+    under either are visible inside the image. Anything elsewhere needs
+    --bind, so keep models, reference and output under the working directory.
+    """
+    if shutil.which("ost"):
+        return ["ost"]
+    img = os.environ.get("OST_IMAGE")
+    if img and os.path.exists(img):
+        for runner in ("apptainer", "singularity"):
+            if shutil.which(runner):
+                return [runner, "exec", img, "ost"]
+    return None
+
+
+def _parse_ost_local(block):
+    """OST per-residue scores, keyed "<chain>.<resnum>.<inscode>".
+
+    Returns ({resnum: value} for the chain with the most residues, number of
+    chains seen), so a multi-chain model cannot silently collapse into one
+    series. Residues OST could not score come back as null and are dropped.
+    """
+    by_chain = {}
+    for k, v in (block or {}).items():
+        if v is None:
+            continue
+        parts = k.split(".")
+        if len(parts) < 2:
+            continue
+        if len(parts) > 2 and parts[2].strip():
+            continue          # insertion code, so no plain integer numbering
+        try:
+            by_chain.setdefault(parts[0], {})[int(parts[1])] = float(v)
+        except (TypeError, ValueError):
+            continue
+    if not by_chain:
+        return {}, 0
+    best = max(by_chain, key=lambda c: len(by_chain[c]))
+    return by_chain[best], len(by_chain)
+
+
+_OST_CACHE = {}
+
+
+def lddt_ost(model, ref, cmd, stereochecks=True, timeout=1800):
+    """lDDT from OpenStructure's compare-structures. None if it failed.
+
+    Returns:
+        aa_global : all-atom global lDDT                     (OST key lddt)
+        bb_global : backbone global lDDT, CA only for peptides  (bb_lddt)
+        bb_local  : {model residue number: per-residue backbone lDDT}
+        clashes, bad_bonds, bad_angles : stereochemistry counts in the model
+
+    With stereochecks on, which is the default and what CASP does, lDDT drops
+    residues that fail them. A large count therefore means the score covers
+    fewer residues than the sequence length suggests, so the counts are
+    reported rather than hidden.
+
+    Residue correspondence is left to OpenStructure, which aligns the
+    sequences by default rather than trusting residue numbers. That handles
+    the offset between a construct numbered from 1 and the reference without
+    being told about it. The per-residue keys are in the MODEL's numbering.
+    """
+    key = (os.path.abspath(model), os.path.abspath(ref), stereochecks)
+    if key in _OST_CACHE:
+        return _OST_CACHE[key]
+
+    out_json, data = None, None
+    try:
+        # Written into the working directory, not /tmp, because Apptainer
+        # binds the working directory into the image and may not bind /tmp.
+        fd, out_json = tempfile.mkstemp(suffix=".json", prefix=".ost_",
+                                        dir=os.getcwd())
+        os.close(fd)
+        argv = cmd + ["compare-structures",
+                      "-m", model, "-r", ref, "-o", out_json,
+                      "--lddt", "--local-lddt",
+                      "--bb-lddt", "--bb-local-lddt"]
+        if not stereochecks:
+            argv.append("--lddt-no-stereochecks")
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=timeout)
+        with open(out_json) as fh:
+            data = json.load(fh)
+    except Exception as e:
+        tail = ""
+        try:
+            tail = (proc.stderr or "").strip().splitlines()[-1]
+        except Exception:
+            pass
+        print(f"   OpenStructure failed on {os.path.basename(model)}: {e}"
+              + (f" / {tail}" if tail else ""), file=sys.stderr)
+        _OST_CACHE[key] = None
+        return None
+    finally:
+        if out_json and os.path.exists(out_json):
+            os.remove(out_json)
+
+    if data.get("status") != "SUCCESS":
+        tb = (data.get("traceback") or "").strip().splitlines()
+        print(f"   OpenStructure returned {data.get('status')} on "
+              f"{os.path.basename(model)}"
+              + (f": {tb[-1]}" if tb else ""), file=sys.stderr)
+        _OST_CACHE[key] = None
+        return None
+
+    local, n_chains = _parse_ost_local(data.get("bb_local_lddt"))
+    if n_chains > 1:
+        print(f"   note: OpenStructure scored {n_chains} chains in "
+              f"{os.path.basename(model)}; using the largest.",
+              file=sys.stderr)
+
+    res = {
+        "aa_global": data.get("lddt"),
+        "bb_global": data.get("bb_lddt"),
+        "bb_local": local,
+        "clashes": data.get("model_clashes"),
+        "bad_bonds": data.get("model_bad_bonds"),
+        "bad_angles": data.get("model_bad_angles"),
+        "ost_version": data.get("ost_version"),
+    }
+    _OST_CACHE[key] = res
+    return res
+
+
+def _n(x, nd=4):
+    """Round, tolerating None."""
+    return None if x is None else round(float(x), nd)
+
+
+def _count(x):
+    """OST reports stereochemistry problems as lists; we want how many."""
+    if x is None:
+        return None
+    return len(x) if isinstance(x, (list, tuple)) else x
+
+
 # ---------------------------------------------------------------- correspond
 
 def align_by_resnum(nums_a, xyz_a, nums_b, xyz_b, offset=0, exclude=None):
@@ -261,11 +423,24 @@ def construct_offset(cfg, construct):
 
 # ---------------------------------------------------------------------- modes
 
-def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
+def mode_reference(df, ref_path, ref_chain, cfg, calib_path,
+                   ost_cmd=None, ost_stereochecks=True, ost_off=False):
     rn, rx, _ = read_ca(ref_path, ref_chain)
     if rx is None:
         sys.exit(f"Could not read CA atoms from {ref_path}")
     print(f"reference: {len(rx)} CA atoms, residues {rn.min()}-{rn.max()}")
+
+    if ost_cmd:
+        print(f"lDDT: CA implementation here, plus OpenStructure via "
+              f"{' '.join(ost_cmd)}"
+              + ("" if ost_stereochecks else " (stereochecks off)"))
+    elif ost_off:
+        print("lDDT: CA implementation here only, because "
+              "--no-openstructure was given.")
+    else:
+        print("lDDT: CA implementation here only. OpenStructure not found; "
+              "install it or set $OST_IMAGE to also get the reference "
+              "implementation.")
 
     doms = (cfg or {}).get("domains", {})
     skip = excluded_residues(cfg)
@@ -305,6 +480,33 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
         if tm is not None:
             row["tmscore"] = round(tm, 4)
 
+        # OpenStructure, when available. Its numbers sit alongside the CA
+        # ones rather than replacing them, so earlier results stay comparable
+        # and the two implementations can be checked against each other.
+        ost = lddt_ost(cif, ref_path, ost_cmd,
+                       stereochecks=ost_stereochecks) if ost_cmd else None
+        ost_local = {}
+        row["lddt_source"] = "ca+openstructure" if ost else "ca"
+        if ost:
+            ost_local = ost["bb_local"]
+            row["lddt_ost_aa"] = _n(ost["aa_global"])
+            row["lddt_ost_bb"] = _n(ost["bb_global"])
+            row["n_ost_scored"] = len(ost_local)
+            row["ost_clashes"] = _count(ost["clashes"])
+            row["ost_bad_bonds"] = _count(ost["bad_bonds"])
+            row["ost_bad_angles"] = _count(ost["bad_angles"])
+            # OpenStructure has no residue-exclusion flag, so the excluded
+            # regions are removed afterwards by averaging its per-residue
+            # values over the residues we keep. That is not identical to a
+            # global lDDT recomputed with those residues deleted, because
+            # global lDDT pools all distance pairs rather than averaging
+            # per-residue scores. Reported under its own name for that
+            # reason. For exact comparability, trim the reference and the
+            # model first and rerun.
+            kept = [v for n, v in ost_local.items() if n + off not in skip]
+            if kept:
+                row["lddt_ost_bb_kept"] = round(float(np.mean(kept)), 4)
+
         # Per-domain: lDDT on the same correspondence, plus a separate
         # superposition of that domain alone. A big gap between a domain's
         # own RMSD and the global RMSD means the fold is right but the
@@ -317,6 +519,10 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
             row[f"lddt_{name}"] = round(float(np.nanmean(per_res[sel])), 4)
             d_rmsd, _, _ = kabsch_rmsd(A[sel], B[sel])
             row[f"rmsd_{name}"] = round(d_rmsd, 2)
+            dv = [v for n, v in ost_local.items()
+                  if ds <= n + off <= de and n + off not in skip]
+            if len(dv) >= 10:
+                row[f"lddt_ost_{name}"] = round(float(np.mean(dv)), 4)
 
         rows.append(row)
 
@@ -337,6 +543,9 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
                     "model": r.get("model"), "resnum_global": g,
                     "domain": dom, "plddt": plddt_by_global[g],
                     "lddt": float(per_res[k]),
+                    # Same residue, OpenStructure's backbone lDDT. Its keys
+                    # are in the model's numbering, hence g - off.
+                    "lddt_ost": ost_local.get(g - off),
                 })
 
     out = pd.DataFrame(rows)
@@ -360,6 +569,37 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path):
                               f"confidently wrong: {hi_wrong:5.1%}")
             print("\n'Confidently wrong' = pLDDT above 80 with lDDT below 0.6.")
             print("A high figure for DUF is the result the project is after.")
+
+        # The same calibration against OpenStructure's lDDT. If the two
+        # implementations disagree about which domain is well calibrated,
+        # that is worth knowing before any of it goes in the report.
+        sub_o = cal.dropna(subset=["plddt", "lddt_ost"]) \
+            if "lddt_ost" in cal.columns else cal.iloc[0:0]
+        if len(sub_o) > 2:
+            r_o = np.corrcoef(sub_o["plddt"], sub_o["lddt_ost"])[0, 1]
+            print(f"\nsame calibration against OpenStructure lDDT: "
+                  f"r = {r_o:.3f}")
+            if "domain" in sub_o and sub_o["domain"].any():
+                for dom, g in sub_o.groupby("domain"):
+                    if dom and len(g) > 2:
+                        rr = np.corrcoef(g["plddt"], g["lddt_ost"])[0, 1]
+                        print(f"   {dom:8s} r = {rr:6.3f}   "
+                              f"mean lDDT {g['lddt_ost'].mean():.3f}")
+
+    # Implementation check: OST's --bb-lddt is CA only for peptides, so it
+    # should land close to the CA version computed here. A systematic gap
+    # means one of the two is parameterised differently, not that the model
+    # is better or worse than it looked.
+    if not out.empty and {"lddt_global", "lddt_ost_bb"} <= set(out.columns):
+        pair = out[["lddt_global", "lddt_ost_bb"]].dropna()
+        if len(pair):
+            d = (pair["lddt_global"] - pair["lddt_ost_bb"])
+            print(f"\nCA-lDDT vs OpenStructure backbone lDDT over "
+                  f"{len(pair)} models: mean difference {d.mean():+.4f}, "
+                  f"largest {d.abs().max():.4f}")
+            print("Close agreement means the CA implementation here is "
+                  "sound. The remaining gap to lddt_ost_aa is side chains, "
+                  "which the 3.16 A reference does not resolve reliably.")
     return out
 
 
@@ -410,6 +650,18 @@ def main():
     ap.add_argument("--calibration", default=None,
                     help="write per-residue pLDDT vs lDDT to this CSV")
     ap.add_argument("--out", default="comparison.csv")
+    ap.add_argument("--no-openstructure", action="store_true",
+                    help="skip OpenStructure even if it is available, and "
+                         "report only the CA implementation")
+    ap.add_argument("--ost-image", default=None,
+                    help="Apptainer image holding OpenStructure. Same effect "
+                         "as setting $OST_IMAGE")
+    ap.add_argument("--ost-no-stereochecks", action="store_true",
+                    help="pass --lddt-no-stereochecks to OpenStructure. Use "
+                         "this when comparing the two implementations, since "
+                         "the CA version here filters nothing; leave it off "
+                         "for numbers going in the report, where the default "
+                         "matches CASP")
     args = ap.parse_args()
 
     if not os.path.exists(args.summary):
@@ -427,12 +679,19 @@ def main():
         print("note: US-align not on PATH, so TM-score is skipped. "
               "RMSD and CA-lDDT still work.\n")
 
+    if args.ost_image:
+        os.environ["OST_IMAGE"] = args.ost_image
+    ost_cmd = None if args.no_openstructure else ost_command()
+
     if args.consistency:
         out = mode_consistency(df)
         label = "consistency across seeds and samples"
     elif args.reference:
         ref_chain = (cfg or {}).get("target", {}).get("reference_chain")
-        out = mode_reference(df, args.reference, ref_chain, cfg, args.calibration)
+        out = mode_reference(df, args.reference, ref_chain, cfg,
+                             args.calibration, ost_cmd=ost_cmd,
+                             ost_stereochecks=not args.ost_no_stereochecks,
+                             ost_off=args.no_openstructure)
         label = "accuracy against the reference"
     else:
         sys.exit("Give --reference REF or --consistency.")
