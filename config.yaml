@@ -112,15 +112,32 @@ run:
   seeds: 5
   diffusion_samples: 5
   recycling_steps: 6
-  use_msa_server: false   # see README; set true only after the data question
-                          # with Ute is settled and compute nodes can reach it
+  # Compute nodes CAN reach api.colabfold.com: verified by job 4454895 on
+  # 2026-11-18, which called it successfully from gpu-5. So the remaining
+  # question is not technical but about the data. The server is a public
+  # third-party service, so using it means sending the sequence there. For
+  # CCTX2 the sequence is published, so there is nothing to withhold; for an
+  # unpublished sequence, ask first.
+  #
+  # Alignment depth is not a side issue here. The co-evolution explanation
+  # for why the DUF domain is predicted well is tested by varying it, so a
+  # run with no MSA is a different experiment, not a cheaper version of the
+  # same one. Record which was used with every result.
+  use_msa_server: false
 
 slurm:
   account: ec12           # check with `projects`
   partition: accel        # check with `sinfo`
   gpus: 1
   cpus_per_task: 8
+  # 129 residues used 10.1 GiB (job 4454895). Attention scales with the
+  # square of the length, and CCTX2 is six times longer, so this is a guess
+  # rather than a measurement. Watch for "CUDA out of memory" on the first
+  # full-length run and ask for a bigger card before raising --mem: the
+  # limit is usually GPU memory, not host memory.
   mem: 64G
+  # 129 residues took 82 seconds with one diffusion sample. Scale with care:
+  # the config asks for 5 samples, and length costs more than linearly.
   time: "04:00:00"
   # Must match $BOLTZ_CACHE, which env.sh sets. Home rather than the project
   # area: the weights unpack into many small files, and the ec12 fileset is a
