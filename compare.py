@@ -628,20 +628,39 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path,
         print(f"wrote {calib_path}: {len(cal)} residue observations")
         sub = cal.dropna(subset=["plddt", "lddt"])
         if len(sub) > 2:
-            r_all = _corr(sub["plddt"], sub["lddt"])
-            print(f"\nconfidence calibration, all residues: r = {r_all:.3f}")
-            if "domain" in sub and sub["domain"].any():
-                print("by domain:")
-                for dom, g in sub.groupby("domain"):
-                    if dom and len(g) > 2:
-                        rr = _corr(g["plddt"], g["lddt"])
-                        hi_wrong = ((g["plddt"] > 80) & (g["lddt"] < 0.6)).mean()
-                        print(f"   {dom:8s} r = {rr:6.3f}   "
-                              f"mean pLDDT {g['plddt'].mean():5.1f}   "
-                              f"mean lDDT {g['lddt'].mean():.3f}   "
-                              f"confidently wrong: {hi_wrong:5.1%}")
+            # Per construct, never pooled across them. Different constructs
+            # sit at different accuracy levels, so a pooled correlation is
+            # driven by the difference between constructs rather than by
+            # whether confidence tracks accuracy within any of them, and it
+            # can even come out negative when each construct is positive.
+            constructs = sorted(sub["construct"].unique())
+            if len(constructs) > 1:
+                print("\nconfidence calibration, per construct "
+                      "(not pooled: see below)")
+            else:
+                print("\nconfidence calibration")
+            for con in constructs:
+                s = sub[sub["construct"] == con]
+                if len(s) <= 2:
+                    continue
+                print(f"\n  {con}: r = {_corr(s['plddt'], s['lddt']):.3f} "
+                      f"over {len(s)} residues")
+                if "domain" in s and s["domain"].any():
+                    for dom, g in s.groupby("domain"):
+                        if dom and len(g) > 2:
+                            rr = _corr(g["plddt"], g["lddt"])
+                            hi_wrong = ((g["plddt"] > 80)
+                                        & (g["lddt"] < 0.6)).mean()
+                            print(f"     {dom:8s} r = {rr:6.3f}   "
+                                  f"mean pLDDT {g['plddt'].mean():5.1f}   "
+                                  f"mean lDDT {g['lddt'].mean():.3f}   "
+                                  f"confidently wrong: {hi_wrong:5.1%}")
             print("\n'Confidently wrong' = pLDDT above 80 with lDDT below 0.6.")
             print("A high figure for DUF is the result the project is after.")
+            if len(constructs) > 1:
+                print("No figure is given across constructs on purpose. "
+                      "Compare domains\nwithin a construct, and constructs "
+                      "with each other, but do not pool them.")
 
         # The same calibration against OpenStructure's lDDT. If the two
         # implementations disagree about which domain is well calibrated,

@@ -120,64 +120,40 @@ fi
 
 note "3. Three copies of it, with known answers"
 
+rm -f results/identity_model_0.* results/rigid_model_0.* results/rough_model_0.*
+python3 "$HERE/make_testcase.py" ref.cif --out results/ || exit 1
+
 python3 - <<'PY' || exit 1
-import sys
-import numpy as np
+import glob, os, sys
 import pandas as pd
-sys.path.insert(0, __import__("os").environ["TOOLCHECK_SRC"])
+sys.path.insert(0, os.environ["TOOLCHECK_SRC"])
 from compare import read_ca
 
+rows = []
+for c in ("identity", "rigid", "rough"):
+    hits = glob.glob(f"results/{c}_model_0.*")
+    if not hits:
+        print(f"   FAIL  {c} copy was not written")
+        raise SystemExit(1)
+    rows.append({"predictor": "test", "construct": c, "ligand": "none",
+                 "seed": 1, "model": 0, "cif": hits[0]})
+pd.DataFrame(rows).to_csv("summary.csv", index=False)
+
+# The construct regions must start at 1 so compare.py's offset is 0: these
+# copies already carry the reference's own residue numbering. The upper bound
+# comes from read_ca rather than from the file directly, so it is whatever
+# compare.py itself will see.
 nums, xyz, _ = read_ca("ref.cif")
 if xyz is None or len(xyz) < 20:
-    print("   FAIL  could not read CA atoms from ref.cif")
+    print("   FAIL  compare.py cannot read CA atoms from ref.cif")
     raise SystemExit(1)
-print(f"   ok    read {len(xyz)} CA atoms, residues {nums.min()}-{nums.max()}")
-
-rng = np.random.default_rng(0)
-
-def write_pdb(path, coords, plddt):
-    with open(path, "w") as fh:
-        for i, ((x, y, z), n) in enumerate(zip(coords, nums)):
-            fh.write(f"ATOM  {i+1:5d}  CA  ALA A{int(n):4d}    "
-                     f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00{plddt[i]:6.2f}"
-                     f"           C\n")
-        fh.write("END\n")
-
-# (a) identical. Every metric must be perfect.
-write_pdb("results/identity_model_0.pdb", xyz, np.full(len(xyz), 90.0))
-
-# (b) rigid-body: rotated 37 degrees about z and shifted 25 A. Superposition
-#     must undo this exactly, so RMSD must still be ~0 and TM ~1. If it is
-#     not, something is comparing coordinates without superposing them.
-a = np.deg2rad(37.0)
-R = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
-write_pdb("results/rigid_model_0.pdb", xyz @ R.T + np.array([25.0, -10.0, 5.0]),
-          np.full(len(xyz), 90.0))
-
-# (c) roughened: 1.0 A of Gaussian noise per coordinate. Expected RMSD is
-#     about sigma*sqrt(3) = 1.73 A, a little less after superposition.
-#     pLDDT is written to track the actual error, so the calibration
-#     correlation must come out strongly positive.
-noisy = xyz + rng.normal(0, 1.0, xyz.shape)
-err = np.linalg.norm(noisy - xyz, axis=1)
-spread = max(float(np.ptp(err)), 1e-9)
-write_pdb("results/rough_model_0.pdb", noisy,
-          np.clip(95 - 60 * (err - err.min()) / spread, 30, 98))
-
-pd.DataFrame([
-    {"predictor": "test", "construct": c, "ligand": "none", "seed": 1,
-     "model": 0, "cif": f"results/{c}_model_0.pdb"}
-    for c in ("identity", "rigid", "rough")
-]).to_csv("summary.csv", index=False)
-
-# regions start at 1 so compare.py's construct offset is 0, because these
-# copies already carry the reference's own residue numbering.
 with open("config_test.yaml", "w") as fh:
     fh.write("target:\n  reference_chain: A\n")
     fh.write("constructs:\n")
     for c in ("identity", "rigid", "rough"):
         fh.write(f"  {c}:\n    regions: [[1, {int(nums.max())}]]\n")
-print("   ok    wrote three copies, summary.csv and config_test.yaml")
+print(f"   ok    summary.csv and config_test.yaml written; compare.py sees "
+      f"{len(xyz)} CA atoms, residues {nums.min()}-{nums.max()}")
 PY
 
 

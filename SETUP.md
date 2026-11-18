@@ -149,7 +149,50 @@ names the exact interpreter the environment was built against, and
 
 ---
 
-## 6. Get OpenStructure
+## 6. If the image is behind: build US-align locally
+
+`check_tools.sh` may report that US-align was not found even when
+`$BOLTZ_IMAGE` is set and the file exists. Check whether the binary is
+actually in there:
+
+```bash
+apptainer exec $BOLTZ_IMAGE which USalign
+apptainer exec $BOLTZ_IMAGE tail -5 /opt/versions.txt
+```
+
+An empty answer from `which` means the image predates the Dockerfile change
+that added US-align and Foldseek. Two causes are possible, and both can
+apply: the image on the registry has not been rebuilt, or `apptainer pull`
+served an older copy from its own cache. `apptainer pull` says
+`Using cached SIF image` when it does that, which looks like a successful
+download.
+
+The quick fix is to build US-align yourself. It is a single C++ file:
+
+```bash
+mkdir -p ~/bin && cd ~/bin
+curl -sSL -o USalign.cpp https://zhanggroup.org/US-align/bin/module/USalign.cpp
+g++ -O3 -ffast-math -lm -o USalign USalign.cpp && rm USalign.cpp
+USalign -h | head -2
+```
+
+`env.sh` puts `~/bin` at the front of `PATH`, so a locally built tool wins
+over the image. Building one source file beats re-pulling several gigabytes.
+
+To fix the image itself, re-run the container workflow on GitHub, then:
+
+```bash
+apptainer cache clean -f
+apptainer pull --force $BOLTZ_IMAGE \
+    docker://ghcr.io/andreasdh/protein-structure-prediction/boltz:latest
+```
+
+`cache clean` before `pull` is what makes the second command fetch rather
+than reuse. `--force` overwrites the existing `.sif`.
+
+---
+
+## 7. Get OpenStructure
 
 `compare.py` computes lDDT itself, on CA atoms. OpenStructure is the reference
 implementation, and running both is how we show our own version is right.
@@ -166,7 +209,7 @@ One image is one inode, so this adds nothing to the inode pressure.
 
 ---
 
-## 7. Check everything works
+## 8. Check everything works
 
 ```bash
 cd ~/Protein-Structure-Prediction
@@ -186,7 +229,7 @@ change to the environment.
 
 ---
 
-## 8. Check the container works
+## 9. Check the container works
 
 No GPU needed for this:
 
@@ -200,7 +243,7 @@ PyTorch versions inside. Those lines belong in a methods section.
 
 ---
 
-## 9. Download the model weights
+## 10. Download the model weights
 
 Once, from a login node, so that jobs do not all race for the same files:
 
@@ -230,7 +273,7 @@ ls -lh $BOLTZ_CACHE
 
 ---
 
-## 10. Run something on a GPU
+## 11. Run something on a GPU
 
 Check which nodes have room:
 
@@ -265,7 +308,7 @@ Record the time it took. It tells you what a larger run will cost.
 
 ---
 
-## 11. Daily workflow
+## 12. Daily workflow
 
 First, always:
 
@@ -303,7 +346,7 @@ a few minutes, submit with `sbatch` and walk away.
 
 ---
 
-## 12. Before anything that gets reported
+## 13. Before anything that gets reported
 
 Three habits, and they are not optional.
 
@@ -330,7 +373,7 @@ one prediction is not a prediction.
 
 ---
 
-## 13. When something fails
+## 14. When something fails
 
 | Symptom | Cause |
 | --- | --- |

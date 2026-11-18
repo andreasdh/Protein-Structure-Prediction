@@ -49,6 +49,16 @@ export BOLTZ_CACHE="${BOLTZ_CACHE:-$HOME/boltz_cache}"
 export BOLTZ_IMAGE="$IMAGES/boltz.sif"
 export OST_IMAGE="$IMAGES/ost.sif"
 
+# ~/bin first, so a locally built tool wins over the image. Useful when the
+# image is behind: US-align is one source file, and building it locally is
+# faster than rebuilding and re-pulling several GB.
+if [ -d "$HOME/bin" ]; then
+    case ":$PATH:" in
+        *":$HOME/bin:"*) ;;
+        *) export PATH="$HOME/bin:$PATH" ;;
+    esac
+fi
+
 if [ "$_venv_ok" = yes ]; then
     echo "python     $(python3 --version 2>&1 | awk '{print $2}')  ($VENV)"
 else
