@@ -407,6 +407,20 @@ def _n(x, nd=4):
     return None if x is None else round(float(x), nd)
 
 
+def _corr(x, y):
+    """Pearson r, or nan when a series is constant, without a numpy warning.
+
+    A constant series is not a pathological input here: a domain can come out
+    with flat lDDT, and a correlation is then undefined rather than zero.
+    """
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    if len(x) < 3 or not np.isfinite(x).all() or not np.isfinite(y).all():
+        return float("nan")
+    if x.std() == 0 or y.std() == 0:
+        return float("nan")
+    return float(np.corrcoef(x, y)[0, 1])
+
+
 def _count(x):
     """OST reports stereochemistry problems as lists; we want how many."""
     if x is None:
@@ -613,13 +627,13 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path,
         print(f"wrote {calib_path}: {len(cal)} residue observations")
         sub = cal.dropna(subset=["plddt", "lddt"])
         if len(sub) > 2:
-            r_all = np.corrcoef(sub["plddt"], sub["lddt"])[0, 1]
+            r_all = _corr(sub["plddt"], sub["lddt"])
             print(f"\nconfidence calibration, all residues: r = {r_all:.3f}")
             if "domain" in sub and sub["domain"].any():
                 print("by domain:")
                 for dom, g in sub.groupby("domain"):
                     if dom and len(g) > 2:
-                        rr = np.corrcoef(g["plddt"], g["lddt"])[0, 1]
+                        rr = _corr(g["plddt"], g["lddt"])
                         hi_wrong = ((g["plddt"] > 80) & (g["lddt"] < 0.6)).mean()
                         print(f"   {dom:8s} r = {rr:6.3f}   "
                               f"mean pLDDT {g['plddt'].mean():5.1f}   "
@@ -634,13 +648,13 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path,
         sub_o = cal.dropna(subset=["plddt", "lddt_ost"]) \
             if "lddt_ost" in cal.columns else cal.iloc[0:0]
         if len(sub_o) > 2:
-            r_o = np.corrcoef(sub_o["plddt"], sub_o["lddt_ost"])[0, 1]
+            r_o = _corr(sub_o["plddt"], sub_o["lddt_ost"])
             print(f"\nsame calibration against OpenStructure lDDT: "
                   f"r = {r_o:.3f}")
             if "domain" in sub_o and sub_o["domain"].any():
                 for dom, g in sub_o.groupby("domain"):
                     if dom and len(g) > 2:
-                        rr = np.corrcoef(g["plddt"], g["lddt_ost"])[0, 1]
+                        rr = _corr(g["plddt"], g["lddt_ost"])
                         print(f"   {dom:8s} r = {rr:6.3f}   "
                               f"mean lDDT {g['lddt_ost'].mean():.3f}")
 

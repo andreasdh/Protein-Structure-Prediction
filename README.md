@@ -44,6 +44,26 @@ default.
 See the lDDT section below for why both lDDT implementations are reported and
 which number belongs in the report.
 
+## Checking the tools work
+
+`selftest.py` checks the scripts. `check_tools.sh` checks the whole chain,
+including US-align and OpenStructure in their containers:
+
+```bash
+./check_tools.sh                      # downloads lysozyme (2LYZ)
+./check_tools.sh reference/9s11.cif   # or use a structure you already have
+```
+
+It compares a structure against itself, so the right answer is known exactly
+and any deviation is a bug rather than something to interpret. It also compares
+it against a rotated copy, where superposition must undo the motion, and
+against a copy roughened by a known amount of noise, where the expected RMSD is
+known. It exits non-zero if any check fails, and reports which tools it could
+not find rather than quietly leaving their columns empty.
+
+Run it after any change to the environment: a new image, a new OpenStructure
+version, a move to a different cluster.
+
 ## Before the first real run
 
 Three things in `config.yaml` are placeholders and will give wrong answers if
