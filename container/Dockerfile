@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-dev \
         build-essential \
         git \
+        curl \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -71,6 +72,30 @@ RUN pip install \
         gemmi \
         biopython
 
+# --- structure comparison and search tools ---------------------------------
+# Both are single static binaries with no dependencies, so they cost almost
+# nothing to include and mean the analysis runs in the same frozen
+# environment as the predictions.
+
+# Foldseek: structure search. Used against AlphaFold DB / ESM Atlas.
+# avx2 is the right build for Fox's AMD EPYC nodes; use the sse2 tarball on
+# older hardware. This URL always serves the newest release, so the version
+# is recorded in /opt/versions.txt below rather than pinned here. Pin it to a
+# GitHub release tag instead if an exact version matters more than currency.
+RUN curl -sSL https://mmseqs.com/foldseek/foldseek-linux-avx2.tar.gz \
+        | tar xz -C /opt \
+    && ln -s /opt/foldseek/bin/foldseek /usr/local/bin/foldseek \
+    && foldseek version
+
+# US-align: TM-score between two structures. One C++ file, no dependencies.
+# Remove these three lines if you do not want it; nothing else depends on it,
+# and compare.py simply skips TM-score when the binary is absent.
+RUN curl -sSL -o /tmp/USalign.cpp \
+        https://zhanggroup.org/US-align/bin/module/USalign.cpp \
+    && g++ -O3 -ffast-math -lm -o /usr/local/bin/USalign /tmp/USalign.cpp \
+    && rm /tmp/USalign.cpp \
+    && USalign -h > /dev/null && echo "USalign built"
+
 # Prove the thing actually imports, at build time rather than on the cluster.
 # This is the check that would have caught the 22.04 problem in CI.
 RUN boltz --help > /dev/null && echo "boltz imports cleanly"
@@ -84,7 +109,9 @@ RUN pip list --format=freeze > /opt/versions.txt \
     && python3 -c "import sys, torch; \
         print('python', sys.version.split()[0]); \
         print('torch', torch.__version__)" >> /opt/versions.txt \
-    && echo "cuda_base nvidia/cuda:13.3.1-cudnn-runtime-ubuntu24.04" >> /opt/versions.txt
+    && echo "cuda_base nvidia/cuda:13.3.1-cudnn-runtime-ubuntu24.04" >> /opt/versions.txt \
+    && echo "foldseek $(foldseek version 2>&1 | tail -1)" >> /opt/versions.txt \
+    && echo "USalign $(USalign -h 2>&1 | grep -oE 'version [0-9.]+' | head -1)" >> /opt/versions.txt
 
 WORKDIR /work
 CMD ["boltz", "--help"]

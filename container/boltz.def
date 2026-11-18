@@ -1,17 +1,35 @@
-# Apptainer definition file, equivalent to the Dockerfile next to it.
+# Apptainer definition file. Kept in step with the Dockerfile next to it.
 #
-# This is here for reference and teaching. The Dockerfile is the one actually
-# used, because GitHub's runners build Docker images and Apptainer converts
-# them on pull. Building THIS file requires a Linux machine where you have
-# root or fakeroot, which you do not have on Fox:
+# The Dockerfile is the one actually used: GitHub's runners build Docker
+# images, and Apptainer converts them when you pull. This file is here for
+# reference and teaching, and because a definition file is worth being able
+# to read even if you never build one. Building it needs root or fakeroot on
+# a Linux machine, which you do not have on Fox:
 #
 #     apptainer build --fakeroot boltz.sif boltz.def
 #
-# The structure of a definition file is worth knowing even if you never run
-# it. A header saying what to start from, then sections that each do one job.
+# The structure: a header saying what to start from, then sections that each
+# do one job.
+#
+# If you change one of these two files, change the other. An earlier version
+# of this file claimed to match the Dockerfile while still using the Ubuntu
+# 22.04 base and the system Python, both of which are known to fail. The two
+# fixes below cost two failed builds to find, so they are worth keeping:
+#
+#   Ubuntu 22.04 ships python3.11 as 3.11.0~rc1, a release candidate that
+#   predates sys.get_int_max_str_digits. Recent PyTorch calls it on import:
+#       AttributeError: module 'sys' has no attribute 'get_int_max_str_digits'
+#   The image builds, and then fails the first time anything imports torch.
+#
+#   Ubuntu 24.04 marks its system Python as externally managed (PEP 668).
+#   Pip refuses to touch it, and --break-system-packages still fails, because
+#   Ubuntu's pip came from dpkg and carries no RECORD file to uninstall:
+#       ERROR: Cannot uninstall pip 24.0, RECORD file not found.
+#   A venv at /opt/venv avoids both. Putting it first on PATH makes it the
+#   default python, so nothing downstream needs to know it is there.
 
 Bootstrap: docker
-From: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+From: nvidia/cuda:13.3.1-cudnn-runtime-ubuntu24.04
 
 %labels
     Description Boltz-2 for the CCTX2 structure prediction project
@@ -19,39 +37,74 @@ From: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 %environment
     # Sourced every time the container starts.
+    export PATH=/opt/venv/bin:$PATH
+    export VIRTUAL_ENV=/opt/venv
     export BOLTZ_CACHE=${BOLTZ_CACHE:-/opt/boltz_cache}
     export PYTHONDONTWRITEBYTECODE=1
     export LC_ALL=C
 
 %post
     # Runs once, at build time, inside the image.
+    set -e
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y --no-install-recommends \
-        python3.11 python3.11-venv python3.11-dev python3-pip git ca-certificates
+        python3 python3-venv python3-dev build-essential \
+        git curl ca-certificates
     rm -rf /var/lib/apt/lists/*
 
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-    python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+    # Fail here rather than several steps later if the base image changes.
+    python3 -c "import sys; assert sys.version_info[:2] >= (3, 12), sys.version; \
+        assert hasattr(sys, 'get_int_max_str_digits'), 'release-candidate Python'; \
+        print('python ok:', sys.version)"
+
+    python3 -m venv /opt/venv
+    export PATH=/opt/venv/bin:$PATH
+    export VIRTUAL_ENV=/opt/venv
+    pip install --no-cache-dir --upgrade pip setuptools wheel
 
     # Pinned on purpose. The whole point of the image is that these do not move.
-    python3 -m pip install --no-cache-dir \
+    pip install --no-cache-dir \
         boltz==2.2.1 \
         cuequivariance-torch \
         cuequivariance-ops-torch-cu12
 
-    python3 -m pip install --no-cache-dir \
-        numpy pandas pyyaml gemmi biopython
+    # So the same image runs collect.py and compare.py.
+    pip install --no-cache-dir numpy pandas pyyaml gemmi biopython
+
+    # Foldseek: structure search, used against AlphaFold DB and ESM Atlas.
+    # avx2 suits Fox's AMD EPYC nodes; use the sse2 tarball on older hardware.
+    curl -sSL https://mmseqs.com/foldseek/foldseek-linux-avx2.tar.gz \
+        | tar xz -C /opt
+    ln -s /opt/foldseek/bin/foldseek /usr/local/bin/foldseek
+    foldseek version
+
+    # US-align: TM-score between two structures. One C++ file, no dependencies.
+    curl -sSL -o /tmp/USalign.cpp \
+        https://zhanggroup.org/US-align/bin/module/USalign.cpp
+    g++ -O3 -ffast-math -lm -o /usr/local/bin/USalign /tmp/USalign.cpp
+    rm /tmp/USalign.cpp
+    USalign -h > /dev/null
+
+    # Prove it imports at build time rather than on the cluster. This is the
+    # check that would have caught the 22.04 problem before anyone pulled it.
+    boltz --help > /dev/null
 
     mkdir -p /opt/boltz_cache
-    python3 -m pip list --format=freeze > /opt/versions.txt
+    pip list --format=freeze > /opt/versions.txt
+    python3 -c "import sys, torch; \
+        print('python', sys.version.split()[0]); \
+        print('torch', torch.__version__)" >> /opt/versions.txt
+    echo "cuda_base nvidia/cuda:13.3.1-cudnn-runtime-ubuntu24.04" >> /opt/versions.txt
+    echo "foldseek $(foldseek version 2>&1 | tail -1)" >> /opt/versions.txt
+    echo "USalign $(USalign -h 2>&1 | grep -oE 'version [0-9.]+' | head -1)" >> /opt/versions.txt
 
 %runscript
     # What runs on `apptainer run image.sif ...`
     exec boltz "$@"
 
 %help
-    Boltz-2 for the CCTX2 project.
+    Boltz-2 for the CCTX2 project, plus Foldseek and US-align.
 
     Run a prediction:
         apptainer exec --nv \
@@ -60,5 +113,8 @@ From: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
     See exactly which versions are inside:
         apptainer exec boltz.sif cat /opt/versions.txt
+
+    The last three lines of that file are the CUDA base, Foldseek and
+    US-align. If they are absent, the image predates those tools.
 
     --nv exposes the host NVIDIA drivers. Without it the container sees no GPU.
