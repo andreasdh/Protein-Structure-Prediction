@@ -86,27 +86,37 @@ version, a move to a different cluster.
 
 ## Before the first real run
 
-Three things in `config.yaml` are placeholders and will give wrong answers if
-left as they are.
+Get the reference structure and check the configuration against it:
 
-**Domain boundaries.** The ranges under `domains:` are invented. Read the real
-ones off Figure 1A and the methods of Schmieder et al. EMBO J 2026, and check
-them against the residue numbering actually used in 9S11, which may not match
-UniProt A8NDT7.
-
-**Ligand SMILES.** The LacNAc and LacdiNAc entries say `PLACEHOLDER`. Fill them
-in and check them. Pick the negative control from a glycan the published array
-shows as non-binding.
-
-**Slurm account and partition.** Run `projects` and `sinfo` on Fox rather than
-trusting the defaults.
-
-You also need to supply two files:
-
+```bash
+./get_reference.sh          # downloads 9S11, extracts the sequence, validates
 ```
-sequences/cctx2.fasta     the CCTX2 sequence
-reference/9s11.cif        downloaded from the PDB
-```
+
+It downloads the structure, takes the sequence from it rather than from a
+separate file, and then runs `check_reference.py`, which tests every residue
+number in `config.yaml` against what actually arrived.
+
+That check matters more than it sounds. The paper numbers CCTX2 from 1; the
+deposition adds a His8 tag and a TEV site, so PDB numbering is 16 higher.
+A config in paper numbering still *works*: the comparison runs, the scores
+come out, and they are confidently about the wrong residues. The check names
+that case explicitly, along with domain boundaries that do not exist in the
+model, excluded regions that are already absent, overlapping domains, and a
+`unmodelled_in_reference` claim that the file contradicts.
+
+It cannot tell you the boundaries are the right ones, only that they exist and
+fit. For that, read Appendix Table S4 and add 16.
+
+**Still a placeholder:** the LacNAc and LacdiNAc `smiles:` entries say
+`PLACEHOLDER`. Fill them in and check them before any ligand run. Pick the
+negative control from a glycan the published array shows as non-binding.
+
+**Worth knowing before you read any per-domain score:** the
+`exclude_from_comparison` list removes 32% of BTF4 and a fifth of the DUF
+domain, because those regions are poorly resolved in the cryo-EM map. Report
+those two domains with and without the list. The difference is itself
+informative, and a reader will want to know the choice was not made after
+seeing the results.
 
 ## Typical run
 

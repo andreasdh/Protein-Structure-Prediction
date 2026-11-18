@@ -599,6 +599,15 @@ and the exact error, and ask. Do not spend a day on an infrastructure problem.
 
 | Path | Contents |
 | --- | --- |
+| `env.sh` | the session's environment. `source` it first, every time |
+| `env.local` | your own paths, untracked. Read by `env.sh` |
+| `pull_images.sh` | fetches or refreshes the two container images |
+| `check_tools.sh` | proves the analysis chain works, against known answers |
+| `gpu_check.slurm` | proves the prediction chain works. `sbatch` it |
+| `get_reference.sh` | downloads the reference and validates the config against it |
+| `check_reference.py` | every residue number in the config, tested against the structure |
+| `seq_from_structure.py` | the sequence, taken from the structure rather than a FASTA |
+| `make_testcase.py` | the known-answer copies `check_tools.sh` scores |
 | `config.yaml` | sequences, domain boundaries, constructs, run settings |
 | `make_inputs.py` | configuration to Boltz input files |
 | `make_slurm.py` | input files to a job array |
@@ -608,3 +617,4 @@ and the exact error, and ask. Do not spend a day on an infrastructure problem.
 | `boltz_run.sh` | runs Boltz through the container, or a local environment |
 | `container/` | how the image is built, and the general container guide |
 | `notes/logbook.md` | what was run and why |
+| `selftest.py` | the scripts alone, with synthetic data and no cluster |
