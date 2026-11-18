@@ -2,7 +2,22 @@ results/
 probe/
 reference/*.cif
 reference/*.pdb
-inputs/
 __pycache__/
 *.pyc
 _selftest/
+
+# inputs/ is deliberately NOT ignored. The input files are small, they define
+# exactly what was predicted, and provenance.sh checksums them, so tracking
+# them is what lets a checksum be tied to a commit. See GIT_WORKFLOW.md.
+
+# Editor and OS noise
+.DS_Store
+anaconda_projects/
+.ipynb_checkpoints/
+.vscode/
+*.swp
+
+# Containers and weights: gigabytes, and rebuildable
+*.sif
+boltz_cache/
+toolcheck/

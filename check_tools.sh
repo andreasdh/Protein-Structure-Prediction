@@ -42,13 +42,29 @@ note "1. What is available"
 python3 - <<'PY'
 import importlib, sys
 print(f"         python {sys.version.split()[0]}")
+if sys.version_info[:2] < (3, 10):
+    print(f"   warn  this is an old Python. The login node's system Python is "
+          f"not\n         the environment Boltz was installed into. If you "
+          f"have a venv,\n         activate it first: source "
+          f"~/envs/<name>/bin/activate")
+missing = []
 for m in ("numpy", "pandas", "yaml"):
     try:
         mod = importlib.import_module(m)
         print(f"   ok    {m} {getattr(mod, '__version__', '')}")
     except ImportError:
-        print(f"   FAIL  {m} missing: pip install --break-system-packages {m}")
+        print(f"   FAIL  {m} missing")
+        missing.append(m)
+if missing:
+    pkgs = " ".join("pyyaml" if m == "yaml" else m for m in missing)
+    print(f"\n   Nothing below can run without these. Either activate the "
+          f"environment\n   they are installed in, or: pip install "
+          f"--break-system-packages {pkgs}")
+    raise SystemExit(1)
 PY
+if [ $? -ne 0 ]; then
+    exit 1
+fi
 
 for exe in apptainer singularity; do
     command -v "$exe" >/dev/null && ok "$exe: $(command -v "$exe")"

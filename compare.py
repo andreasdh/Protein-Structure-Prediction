@@ -20,8 +20,9 @@ RUN THIS SCRIPT OUTSIDE ANY CONTAINER. Apptainer cannot be run inside
 Apptainer, so from inside the Boltz image OpenStructure is unreachable. Run
 it outside, with numpy, pandas and pyyaml available, and set:
 
-    export BOLTZ_IMAGE=/projects/ecXXX/boltz.sif   # carries US-align
-    export OST_IMAGE=/projects/ecXXX/ost.sif       # carries OpenStructure
+    IMG=/fp/projects01/<your-project>/$USER/images
+    export BOLTZ_IMAGE=$IMG/boltz.sif    # carries US-align
+    export OST_IMAGE=$IMG/ost.sif        # carries OpenStructure
 
 It then reaches into each image as needed and you get every number in one
 pass. Each missing piece is reported rather than silently dropped.

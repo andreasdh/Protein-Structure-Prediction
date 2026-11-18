@@ -122,4 +122,7 @@ slurm:
   cpus_per_task: 8
   mem: 64G
   time: "04:00:00"
-  boltz_cache: /projects/ecXXX/boltz_cache
+  # Must match $BOLTZ_CACHE in your ~/.bashrc. Home rather than the project
+  # area, because the weights unpack into many small files and the project
+  # area ran out of inodes, not space. Check headroom with `dusage`.
+  boltz_cache: $HOME/boltz_cache

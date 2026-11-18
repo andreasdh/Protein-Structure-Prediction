@@ -17,6 +17,19 @@ tables before you have any real results. Run it first.
 
 ## Setup
 
+On Fox, follow `SETUP.md` once. After that, every session begins with:
+
+```bash
+cd ~/Protein-Structure-Prediction
+source env.sh                # loads the module, the venv and the image paths
+./check_tools.sh             # confirms the whole chain still works
+```
+
+`source`, not `./env.sh`: a subshell's exports are lost when it exits, so the
+script refuses to be run that way.
+
+Elsewhere, the scripts need only `numpy`, `pandas` and `pyyaml`:
+
 ```bash
 pip install numpy pandas pyyaml
 python3 selftest.py          # verify the pipeline works
@@ -32,9 +45,12 @@ Apptainer, so from inside the Boltz image OpenStructure is unreachable. Run it
 outside, point two variables at the images, and it reaches into each as needed:
 
 ```bash
-export BOLTZ_IMAGE=/projects/ecXXX/boltz.sif   # carries US-align
-export OST_IMAGE=/projects/ecXXX/ost.sif       # carries OpenStructure
+IMG=/fp/projects01/<your-project>/$USER/images
+export BOLTZ_IMAGE=$IMG/boltz.sif    # carries US-align
+export OST_IMAGE=$IMG/ost.sif        # carries OpenStructure
 ```
+
+Both belong in `~/.bashrc` so every job and every login has them.
 
 Anything missing is reported rather than silently dropped, and the startup
 lines say which route each tool was found by. Keep models and reference under
@@ -121,11 +137,14 @@ OpenStructure is distributed as a container. Pull it once from a login node and
 point an environment variable at it:
 
 ```bash
-cd /projects/ecXXX
+cd /fp/projects01/<your-project>/$USER/images     # beside boltz.sif
 apptainer pull ost.sif \
     docker://registry.scicore.unibas.ch/schwede/openstructure:latest
-export OST_IMAGE=/projects/ecXXX/ost.sif     # or pass --ost-image
+echo "export OST_IMAGE=$PWD/ost.sif" >> ~/.bashrc  # or pass --ost-image
 ```
+
+One image is one inode, so this does not add to the inode pressure on the
+project area.
 
 `compare.py` then adds these columns, and `lddt_source` records which
 implementations ran:

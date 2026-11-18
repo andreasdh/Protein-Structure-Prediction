@@ -46,7 +46,38 @@ cd Protein-Structure-Prediction
 
 ---
 
-## 3. Get the container
+## 3. Every session starts the same way
+
+Once the setup below is done, this is the whole ritual:
+
+```bash
+cd ~/Protein-Structure-Prediction
+source env.sh
+```
+
+`env.sh` loads the Python module, activates the virtual environment, and sets
+the three variables the scripts look for. It prints what it found and says
+`MISSING` for anything that is not there yet, so you can see the state of the
+environment rather than guess at it.
+
+Source it, do not run it. `./env.sh` would set the variables in a subshell
+that exits immediately, leaving your own shell unchanged. The script refuses
+to run that way rather than appearing to work.
+
+Put the setup in `env.sh` rather than in `~/.bashrc`. A `.bashrc` is per
+person and per machine, it is easy to have it loaded in some shells and not
+others, and nothing records which version of the setup produced a given
+result. `env.sh` is in git with the code.
+
+If your paths differ, override them without editing the file:
+
+```bash
+PROJECT=ec12 VENV=$HOME/envs/boltz source env.sh
+```
+
+---
+
+## 4. Get the container
 
 The container holds Boltz-2 and everything it depends on, frozen at known
 versions. You do not install anything.
@@ -67,20 +98,95 @@ The image is about 6 GB and the download takes a few minutes. `cache clean`
 afterwards matters: the cache holds a second full copy of everything, and it
 has no value once the `.sif` file exists.
 
-Tell the tools where it is:
+`env.sh` already expects the image at that path, so there is nothing to export
+by hand. Create the weight directory:
 
 ```bash
-echo 'export BOLTZ_IMAGE=/fp/projects01/<your-project>/$USER/images/boltz.sif' >> ~/.bashrc
-echo 'export BOLTZ_CACHE=$HOME/boltz_cache' >> ~/.bashrc
-source ~/.bashrc
-mkdir -p $BOLTZ_CACHE
+mkdir -p $HOME/boltz_cache
+source env.sh          # should now print BOLTZ_IMAGE without MISSING
 ```
 
-`BOLTZ_CACHE` is where model weights are stored, separately from the image.
+`BOLTZ_CACHE` is where model weights are stored, separately from the image. It
+lives in your home directory rather than the project area: the weights unpack
+into many small files, and the project area ran out of inodes, not space.
 
 ---
 
-## 4. Check it works
+## 5. A Python environment for the analysis scripts
+
+The container runs the predictions. The analysis scripts run **outside** it,
+because `compare.py` reaches into both containers and Apptainer cannot be run
+inside Apptainer. So they need their own Python with `numpy`, `pandas` and
+`pyyaml`.
+
+The system Python on the login node is 3.9 and does not have them. Use a
+module plus a virtual environment:
+
+```bash
+module load Python/3.12.3-GCCcore-13.3.0
+python3 -m venv ~/envs/boltz
+source ~/envs/boltz/bin/activate
+pip install --upgrade pip
+pip install numpy pandas pyyaml gemmi
+```
+
+**The order matters, every time.** A virtual environment does not contain an
+interpreter, only a pointer to one. Activate it without loading the module
+first and you get:
+
+```
+python3: error while loading shared libraries: libpython3.12.so.1.0:
+cannot open shared object file: No such file or directory
+```
+
+That is the symptom of a missing module, not a broken environment. `env.sh`
+does both in the right order, which is why you should use it rather than
+remembering this.
+
+If the module name above ever stops working, `cat ~/envs/boltz/pyvenv.cfg`
+names the exact interpreter the environment was built against, and
+`module avail Python` lists what the cluster currently offers.
+
+---
+
+## 6. Get OpenStructure
+
+`compare.py` computes lDDT itself, on CA atoms. OpenStructure is the reference
+implementation, and running both is how we show our own version is right.
+Pull it next to the Boltz image, from a login node:
+
+```bash
+cd /fp/projects01/<your-project>/$USER/images
+apptainer pull ost.sif \
+    docker://registry.scicore.unibas.ch/schwede/openstructure:latest
+apptainer cache clean -f
+```
+
+One image is one inode, so this adds nothing to the inode pressure.
+
+---
+
+## 7. Check everything works
+
+```bash
+cd ~/Protein-Structure-Prediction
+source env.sh
+./check_tools.sh
+```
+
+This compares a structure against itself, so the right answer is known
+exactly: RMSD must be 0.00 and every lDDT and TM-score must be 1.0000.
+Anything else is a fault in the setup rather than something to interpret. It
+then checks a rotated copy, where superposition must undo the motion, and a
+copy roughened by a known amount of noise, where the expected RMSD is known.
+
+It exits non-zero if any check fails, and reports which tools it could not
+find instead of quietly leaving their columns empty. Run it again after any
+change to the environment.
+
+---
+
+## 8. Check the container works
 
 No GPU needed for this:
 
@@ -94,7 +200,7 @@ PyTorch versions inside. Those lines belong in a methods section.
 
 ---
 
-## 5. Download the model weights
+## 9. Download the model weights
 
 Once, from a login node, so that jobs do not all race for the same files:
 
@@ -124,7 +230,7 @@ ls -lh $BOLTZ_CACHE
 
 ---
 
-## 6. Run something on a GPU
+## 10. Run something on a GPU
 
 Check which nodes have room:
 
@@ -159,9 +265,16 @@ Record the time it took. It tells you what a larger run will cost.
 
 ---
 
-## 7. Daily workflow
+## 11. Daily workflow
 
-Use the wrapper rather than typing Apptainer commands. It finds the image
+First, always:
+
+```bash
+cd ~/Protein-Structure-Prediction
+source env.sh
+```
+
+Then use the wrapper rather than typing Apptainer commands. It finds the image
 automatically and prints which environment it used:
 
 ```bash
@@ -190,7 +303,7 @@ a few minutes, submit with `sbatch` and walk away.
 
 ---
 
-## 8. Before anything that gets reported
+## 12. Before anything that gets reported
 
 Three habits, and they are not optional.
 
@@ -217,7 +330,7 @@ one prediction is not a prediction.
 
 ---
 
-## 9. When something fails
+## 13. When something fails
 
 | Symptom | Cause |
 | --- | --- |
