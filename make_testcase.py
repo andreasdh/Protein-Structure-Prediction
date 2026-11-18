@@ -47,8 +47,9 @@ def read_pdb(path):
                      float(lines[i][46:54])] for i in idx], float)
     resnum = np.array([int(lines[i][22:26]) for i in idx])
     name = [lines[i][12:16].strip() for i in idx]
+    het = [lines[i].startswith("HETATM") for i in idx]
     return {"kind": "pdb", "lines": lines, "idx": idx,
-            "xyz": xyz, "resnum": resnum, "name": name}
+            "xyz": xyz, "resnum": resnum, "name": name, "het": het}
 
 
 def write_pdb(st, path, xyz, bfac=None):
@@ -105,8 +106,9 @@ def read_cif(path):
     ib = cols.index("B_iso_or_equiv") if "B_iso_or_equiv" in cols else None
     iname = next((cols.index(c) for c in ("label_atom_id", "auth_atom_id")
                   if c in cols), None)
+    igrp = cols.index("group_PDB") if "group_PDB" in cols else None
 
-    rows, xyz, resnum, name = [], [], [], []
+    rows, xyz, resnum, name, het = [], [], [], [], []
     for i in idx:
         f = lines[i].split()
         if len(f) != len(cols):
@@ -120,11 +122,12 @@ def read_cif(path):
         except ValueError:
             resnum.append(0)
         name.append(f[iname].strip('"') if iname is not None else "")
+        het.append(f[igrp].upper() == "HETATM" if igrp is not None else False)
 
     return {"kind": "cif", "lines": lines, "idx": idx, "rows": rows,
             "ix": ix, "iy": iy, "iz": iz, "ib": ib,
             "xyz": np.array(xyz, float), "resnum": np.array(resnum),
-            "name": name}
+            "name": name, "het": het}
 
 
 def write_cif(st, path, xyz, bfac=None):
@@ -168,8 +171,14 @@ def main():
     st = read_structure(args.reference)
     xyz, resnum, name = st["xyz"], st["resnum"], st["name"]
     n_ca = sum(1 for x in name if x == "CA")
-    print(f"   ok    read {len(xyz)} atoms ({n_ca} CA), residues "
-          f"{resnum.min()}-{resnum.max()}")
+    n_het = sum(1 for h in st["het"] if h)
+    print(f"   ok    read {len(xyz)} atoms: {n_ca} CA, "
+          f"{len(xyz) - n_het} polymer, {n_het} solvent or ligand")
+    if n_het:
+        print(f"         The solvent is kept and moved with the rest, so the "
+              f"copies stay\n         complete. It inflates the atom count "
+              f"and OpenStructure's clash\n         counts, but it does not "
+              f"enter any protein lDDT.")
     if n_ca < 20:
         print(f"   FAIL  only {n_ca} CA atoms; too small to test with")
         return 1

@@ -668,15 +668,21 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path,
         sub_o = cal.dropna(subset=["plddt", "lddt_ost"]) \
             if "lddt_ost" in cal.columns else cal.iloc[0:0]
         if len(sub_o) > 2:
-            r_o = _corr(sub_o["plddt"], sub_o["lddt_ost"])
-            print(f"\nsame calibration against OpenStructure lDDT: "
-                  f"r = {r_o:.3f}")
-            if "domain" in sub_o and sub_o["domain"].any():
-                for dom, g in sub_o.groupby("domain"):
-                    if dom and len(g) > 2:
-                        rr = _corr(g["plddt"], g["lddt_ost"])
-                        print(f"   {dom:8s} r = {rr:6.3f}   "
-                              f"mean lDDT {g['lddt_ost'].mean():.3f}")
+            # Per construct here too, for the reason given above.
+            print("\nsame calibration against OpenStructure lDDT")
+            for con in sorted(sub_o["construct"].unique()):
+                s = sub_o[sub_o["construct"] == con]
+                if len(s) <= 2:
+                    continue
+                print(f"\n  {con}: r = "
+                      f"{_corr(s['plddt'], s['lddt_ost']):.3f} "
+                      f"over {len(s)} residues")
+                if "domain" in s and s["domain"].any():
+                    for dom, g in s.groupby("domain"):
+                        if dom and len(g) > 2:
+                            rr = _corr(g["plddt"], g["lddt_ost"])
+                            print(f"     {dom:8s} r = {rr:6.3f}   "
+                                  f"mean lDDT {g['lddt_ost'].mean():.3f}")
 
     # Implementation check: OST's --bb-lddt is CA only for peptides, so it
     # should land close to the CA version computed here. A systematic gap

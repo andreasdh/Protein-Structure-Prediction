@@ -233,6 +233,20 @@ l = val("rough", "lddt_global")
 check("roughened CA-lDDT", l is not None and 0.3 < l < 0.95,
       f"{l} (must sit below 1.0 but well above 0)")
 
+# Not a check. The roughened copy displaces every atom independently, which
+# destroys bond lengths and angles, so it is not a physically possible model.
+# OpenStructure's all-atom lDDT runs stereochemistry checks by default and
+# legitimately discards almost everything, giving ~0. The backbone number is
+# unaffected, which is why the assertions above use it. Explained here so the
+# 0.0 in the table does not look like a fault.
+aa = val("rough", "lddt_ost_aa")
+if aa is not None and aa < 0.1:
+    print(f"   note  roughened OpenStructure all-atom lDDT is {aa}. That is "
+          f"expected:\n         independent noise per atom breaks the bond "
+          f"geometry, so the default\n         stereochemistry checks reject "
+          f"the residues. Backbone lDDT is "
+          f"{val('rough', 'lddt_ost_bb')}.")
+
 # Does the calibration machinery recover a correlation that is there by
 # construction? If not, the pLDDT column is not being read correctly.
 try:
