@@ -28,6 +28,10 @@ source env.sh                # loads the module, the venv and the image paths
 `source`, not `./env.sh`: a subshell's exports are lost when it exits, so the
 script refuses to be run that way.
 
+When something fails, search `SETUP.md` section 14 for the error text before
+trying anything. It lists the failures this setup has actually produced, and
+most of them point somewhere other than where they appear to.
+
 Elsewhere, the scripts need only `numpy`, `pandas` and `pyyaml`:
 
 ```bash

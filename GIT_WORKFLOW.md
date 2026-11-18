@@ -43,18 +43,66 @@ checksum be tied to a commit. Leave `inputs/` out of `.gitignore`.
 
 ## Setting up on Fox
 
-Git is already installed. You need a key to reach GitHub.
+Git is already installed. To read the repository you need nothing:
 
 ```bash
-ssh-keygen -t ed25519 -C "fox-$USER" -f ~/.ssh/id_ed25519
-cat ~/.ssh/id_ed25519.pub
+cd ~
+git clone https://github.com/andreasdh/Protein-Structure-Prediction.git
 ```
 
-Paste the output into GitHub under Settings, SSH and GPG keys, New SSH key.
-Test it:
+To push you need an SSH key. First check whether you already have one:
 
 ```bash
-ssh -T git@github.com
+ls -l ~/.ssh/*.pub 2>/dev/null || echo "no key yet"
+```
+
+**If a key exists but under some other name**, it may be for something else,
+and git will not find it on its own. Test whether GitHub already knows it:
+
+```bash
+ssh -T -i ~/.ssh/<that-key> git@github.com
+```
+
+`Hi <username>!` means you are done. Otherwise make a key for GitHub:
+
+```bash
+ssh-keygen -t ed25519 -C "fox-github-$USER" -f ~/.ssh/id_github -N ""
+cat ~/.ssh/id_github.pub
+```
+
+**Paste the output of that `cat`**, the line beginning `ssh-ed25519
+AAAAC3Nza...`, into GitHub under Settings, SSH and GPG keys, New SSH key.
+Not the `SHA256:...` fingerprint that `ssh-keygen` prints: that is a hash for
+recognising the key, not the key.
+
+`-N ""` makes a key with no passphrase. That is right on a cluster, because a
+queued job cannot answer a passphrase prompt. The cost is that anyone who can
+read your home directory can use it, which on Fox is you and root.
+
+Because the key is not at a default filename, git will not offer it unless
+told:
+
+```bash
+cat >> ~/.ssh/config <<'EOF'
+
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_github
+    IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+```
+
+`IdentitiesOnly yes` is the line that makes this work. Without it ssh offers
+every key it can find, and GitHub can reject you after the first wrong one
+rather than trying the rest. If `~/.ssh/config` already had content, check
+there is a blank line before the new block.
+
+Test, then clone over SSH:
+
+```bash
+ssh -T git@github.com     # expect: Hi <username>!
 ```
 
 Then:

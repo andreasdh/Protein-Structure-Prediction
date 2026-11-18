@@ -6,6 +6,13 @@ download. At the end you can run structure predictions and collect the results.
 Everything here assumes you have an Educloud Research account and belong to a
 project. If you do not, that comes first.
 
+**When something fails, go to section 14 and search it for the error text.**
+Every entry there is a failure someone has already hit on this setup, quoted
+verbatim. Most of them look like something else: a missing module that reads
+as a broken virtual environment, a full shared filesystem that reads as your
+own quota, an empty variable that reads as a corrupt container. Reading the
+error and guessing at the cause is how a morning disappears.
+
 ---
 
 ## 1. Log in
@@ -409,17 +416,179 @@ one prediction is not a prediction.
 
 ## 14. When something fails
 
+Every entry below is an error someone has actually hit setting this up. The
+error text is quoted so you can search this file for what you are looking at.
+
+**First, before anything else:**
+
+```bash
+cd ~/Protein-Structure-Prediction
+source env.sh
+./check_tools.sh
+```
+
+A surprising share of failures are a shell that never sourced `env.sh`.
+
+---
+
+### Python and the environment
+
+**`python3: error while loading shared libraries: libpython3.12.so.1.0: cannot open shared object file`**
+
+The virtual environment is active but its interpreter is not loaded. A venv
+holds a pointer to an interpreter, not the interpreter itself. Load the module
+first, then activate, which is what `env.sh` does in that order. If the module
+name has changed, `cat ~/envs/boltz/pyvenv.cfg` names the interpreter the
+environment was built against.
+
+**`ModuleNotFoundError: No module named 'pandas'`**, or `check_tools.sh`
+reporting Python 3.9
+
+You are on the login node's system Python, not the project environment. Run
+`source env.sh`. If it still happens, section 5 creates the environment.
+
+---
+
+### Storage
+
+**`Disk quota exceeded`, but `dusage` shows free space**
+
+Two different causes, and `dusage` tells you which:
+
+- *Inodes.* `inodesPercent` near 100 means the fileset cannot create another
+  file whatever its size. Model weights unpack into thousands of small files,
+  which is why `BOLTZ_CACHE` lives in home.
+- *A shared fileset that is full.* `available size (GB)` is for the whole
+  fileset, not for you. `ec12` has been down to 25 GB free with 99% of its
+  inodes used, so a write fails there regardless of how little of it is yours.
+  Put `IMAGES=$HOME/images` in `env.local` and keep the images in home, where
+  you have a personal 50 GB quota.
+
+Deleting a large file does not always help immediately: GPFS updates quota
+accounting lazily, so a write can keep failing for a while after you freed
+the space.
+
+**`mv: error writing '...': Disk quota exceeded`**
+
+Worse than it looks. `mv` between two filesystems is copy-then-delete, so
+running out of space partway leaves a truncated file at the destination. If
+the destination was a working image, it is now broken, and the source is
+still there. Never `mv` onto a live image: `cp`, check that the copy works,
+then remove the original. `pull_images.sh` does this correctly.
+
+**`container creation failed: image driver mount failure: squashfuse_ll instance exited with error`**
+
+The `.sif` is truncated or corrupt, usually from an interrupted or
+quota-killed copy. `ls -lh` it: the Boltz image is about 5.8 GB. Re-pull with
+`./pull_images.sh --force`.
+
+---
+
+### Containers
+
+**`FATAL: While checking container encryption: could not open image .../tail`**, or any apptainer error naming a path that is obviously not an image
+
+An environment variable was empty, so the command shifted along by one
+argument. `apptainer exec $BOLTZ_IMAGE tail -3 file` with `$BOLTZ_IMAGE`
+unset becomes `apptainer exec tail -3 file`, and apptainer tries to open
+`tail` as the image. Run `source env.sh`.
+
+The same emptiness is worse with `pull`: `apptainer pull --force $BOLTZ_IMAGE
+docker://...` collapses to a pull that invents its own filename and drops
+several gigabytes in the current directory, reporting success. Use
+`./pull_images.sh`, which stops first.
+
+**`INFO: Using cached SIF image`**
+
+Not a download. Apptainer served its own cache and you have whatever was
+there before, which may be months old. `apptainer cache clean -f` first, or
+use `./pull_images.sh --force`, which does it for you.
+
+**`apptainer exec $BOLTZ_IMAGE which USalign` prints nothing**
+
+The image predates that tool. `apptainer exec $BOLTZ_IMAGE tail -3
+/opt/versions.txt` should name the CUDA base, Foldseek and US-align; if it
+stops at the CUDA base, rebuild. Section 6 has both the rebuild and the
+quicker local build.
+
+---
+
+### Git
+
+**`git@github.com: Permission denied (publickey)`**
+
+No SSH key registered with GitHub from this machine, or a key GitHub is not
+being offered. See GIT_WORKFLOW.md, which covers both, including the case
+where the key is not at the default filename.
+
+**`./check_tools.sh: Permission denied`**
+
+The execute bit is missing. `chmod +x check_tools.sh`. If it keeps happening
+after a clone, the bit is missing in the commit: fix it with
+`git update-index --chmod=+x <file>` and commit that.
+
+**`error: Your local changes to the following files would be overwritten by merge`**
+
+Usually a mode change from a `chmod` you ran yourself. `git diff <file>`: if
+it shows only `old mode` and `new mode`, discard it with
+`git checkout -- <file>` and pull. If it shows real line changes, `git stash`
+instead.
+
+---
+
+### Slurm and GPUs
+
+**Waiting a long time for an interactive `srun`**
+
+Do not wait. Submit the work with `sbatch` and read the log afterwards. An
+interactive session that starts while you are not watching times out unused,
+so the wait has to be spent at the terminal. `gpu_check.slurm` is the batch
+version of the setup test.
+
+`squeue -u $USER -o "%.18i %.9P %.20j %.8T %.10M %R"` shows why a job waits
+in the last column: `Resources` means the GPUs are busy, `Priority` means
+other jobs are ahead of you. `sinfo -p accel` shows what is idle, and asking
+for a less contended card with `--gpus=l40s:1` often starts sooner.
+
 | Symptom | Cause |
 | --- | --- |
 | `No supported gpu backend found` | You are on a login node, not a GPU node |
 | `Memory required by task is not available` | `--mem` missing, or you are already inside a job |
 | The program sees no GPU | `--nv` missing from the `apptainer exec` call |
-| `Disk quota exceeded` with space apparently free | Out of inodes. Check `dusage` |
 | `srun: task 0: Killed` | The job hit its `--time` limit |
 | `command not found: tmux` on a compute node | Start tmux on the login node, before `srun` |
-| Connection drops mid-run | Use tmux. Reattach with `tmux attach` |
-| Waiting a long time for resources | All GPUs busy. `Ctrl-C`, check `sinfo`, ask for a less contended type such as `--gpus=l40s:1` |
-| `CUDA out of memory` | Ask for a larger card: `--gpus=a100_80:1` or an H100 or H200 |
+| Connection drops mid-run | Use `sbatch`, or tmux started on the login node |
+| `CUDA out of memory` | Ask for a larger card: `--gpus=a100_80:1`, or an H100 or H200 |
+
+---
+
+### Scores that look wrong
+
+**OpenStructure lDDT of 0.0 with `n_ost_scored` of 0**
+
+OpenStructure found no chain mapping. It maps chains by sequence alignment,
+so a model whose sequence does not match the reference above
+`--chem-map-seqid-thresh` (70 by default) is not scored at all, and the result
+is 0.0 rather than an error. Check that the model and reference are the same
+protein, and that the sequence came from the structure rather than a separate
+file. `seq_from_structure.py` exists for that reason.
+
+**All-atom lDDT far below the backbone value**
+
+Expected when the model's local geometry is poor: lDDT runs stereochemistry
+checks by default and discards residues that fail them, so a model with bad
+bond lengths scores near zero on all atoms while the backbone is fine. The
+`ost_clashes`, `ost_bad_bonds` and `ost_bad_angles` columns say how much was
+rejected. Against a cryo-EM reference, prefer the backbone number anyway.
+
+**A confidence calibration that comes out negative**
+
+Check you are not reading a figure pooled across constructs. `compare.py`
+reports per construct on purpose, because constructs sit at different accuracy
+levels and a pooled correlation measures the spread between them rather than
+whether confidence tracks accuracy.
+
+---
 
 Try the obvious fix twice. If it still fails, write down exactly what you ran
 and the exact error, and ask. Do not spend a day on an infrastructure problem.
