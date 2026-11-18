@@ -21,3 +21,6 @@ anaconda_projects/
 *.sif
 boltz_cache/
 toolcheck/
+
+# Per-person path overrides, read by env.sh
+env.local

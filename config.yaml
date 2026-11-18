@@ -122,7 +122,8 @@ slurm:
   cpus_per_task: 8
   mem: 64G
   time: "04:00:00"
-  # Must match $BOLTZ_CACHE in your ~/.bashrc. Home rather than the project
-  # area, because the weights unpack into many small files and the project
-  # area ran out of inodes, not space. Check headroom with `dusage`.
+  # Must match $BOLTZ_CACHE, which env.sh sets. Home rather than the project
+  # area: the weights unpack into many small files, and the ec12 fileset is a
+  # shared allocation that has run short of both inodes and space. Home has a
+  # personal quota instead. Check headroom with `dusage`.
   boltz_cache: $HOME/boltz_cache

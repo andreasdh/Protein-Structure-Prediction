@@ -18,9 +18,46 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     exit 1
 fi
 
+# Local overrides, for paths that differ between people and machines. Not
+# tracked by git, so your layout does not become everyone's. Create it with
+# whichever lines you need:
+#
+#     cat > env.local <<'EOF'
+#     IMAGES=$HOME/images
+#     VENV=$HOME/envs/boltz
+#     EOF
+#
+# Anything already set in your shell still wins over this file, so a one-off
+#     IMAGES=/somewhere/else source env.sh
+# works for trying something without editing anything. That takes the four
+# lines below: env.local is sourced as plain assignments, which would
+# otherwise clobber what you just set.
+_pre_PROJECT="${PROJECT:-}"
+_pre_PYMODULE="${PYMODULE:-}"
+_pre_VENV="${VENV:-}"
+_pre_IMAGES="${IMAGES:-}"
+
+if [ -f "env.local" ]; then
+    # shellcheck disable=SC1091
+    source "env.local"
+    echo "env.sh: read env.local"
+fi
+
+[ -n "$_pre_PROJECT" ]  && PROJECT="$_pre_PROJECT"
+[ -n "$_pre_PYMODULE" ] && PYMODULE="$_pre_PYMODULE"
+[ -n "$_pre_VENV" ]     && VENV="$_pre_VENV"
+[ -n "$_pre_IMAGES" ]   && IMAGES="$_pre_IMAGES"
+unset _pre_PROJECT _pre_PYMODULE _pre_VENV _pre_IMAGES
+
 PROJECT="${PROJECT:-ec12}"
 PYMODULE="${PYMODULE:-Python/3.12.3-GCCcore-13.3.0}"
 VENV="${VENV:-$HOME/envs/boltz}"
+
+# Images default to the project area, but that is a shared allocation: on Fox
+# the ec12 fileset has been down to 25 GB free with 99% of its inodes used,
+# and a write there fails with "Disk quota exceeded" regardless of your own
+# usage. Home has a personal quota, so it is the more predictable place.
+# Put IMAGES=$HOME/images in env.local to use it.
 IMAGES="${IMAGES:-/fp/projects01/$PROJECT/$USER/images}"
 
 # The module that the venv was built against. If this ever stops matching,

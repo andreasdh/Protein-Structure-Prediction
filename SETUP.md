@@ -82,6 +82,36 @@ PROJECT=ec12 VENV=$HOME/envs/boltz source env.sh
 Two images: Boltz-2 with everything it depends on, frozen at known versions,
 and OpenStructure for the reference lDDT. You install nothing yourself.
 
+First decide where they go. The default is the project area, but on Fox the
+`ec12` fileset is a shared allocation and has been down to 25 GB free with
+99% of its inodes used. A write there fails with `Disk quota exceeded` no
+matter how little of it is yours, and because `mv` across filesystems is
+copy-then-delete, running out mid-copy leaves a half-written image where a
+working one used to be. Home has a personal quota, 50 GB, so it is the more
+predictable place. Check both before choosing:
+
+```bash
+dusage
+```
+
+Read `available size (GB)` for the project fileset, and `blockLimit` against
+`blockUsage` for your home. The two images come to about 6.5 GB.
+
+To use home, write the choice down once:
+
+```bash
+cat > env.local <<'EOF'
+IMAGES=$HOME/images
+EOF
+```
+
+`env.local` is not tracked by git, so your layout does not become everyone's.
+It can also set `VENV`, `PROJECT` and `PYMODULE`. Anything already exported in
+your shell still wins over it, so `IMAGES=/somewhere/else source env.sh` works
+for a one-off.
+
+Then:
+
 ```bash
 mkdir -p $HOME/boltz_cache
 source env.sh            # both paths will say MISSING; that is the point
