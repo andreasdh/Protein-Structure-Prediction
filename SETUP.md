@@ -77,34 +77,25 @@ PROJECT=ec12 VENV=$HOME/envs/boltz source env.sh
 
 ---
 
-## 4. Get the container
+## 4. Get the containers
 
-The container holds Boltz-2 and everything it depends on, frozen at known
-versions. You do not install anything.
-
-Pull it **from a login node**, not from inside a job. It is a download, it
-needs no GPU, and a job's time limit can expire mid-transfer.
-
-```bash
-mkdir -p /fp/projects01/<your-project>/$USER/images
-
-apptainer pull /fp/projects01/<your-project>/$USER/images/boltz.sif \
-    docker://ghcr.io/andreasdh/protein-structure-prediction/boltz:latest
-
-apptainer cache clean -f
-```
-
-The image is about 6 GB and the download takes a few minutes. `cache clean`
-afterwards matters: the cache holds a second full copy of everything, and it
-has no value once the `.sif` file exists.
-
-`env.sh` already expects the image at that path, so there is nothing to export
-by hand. Create the weight directory:
+Two images: Boltz-2 with everything it depends on, frozen at known versions,
+and OpenStructure for the reference lDDT. You install nothing yourself.
 
 ```bash
 mkdir -p $HOME/boltz_cache
-source env.sh          # should now print BOLTZ_IMAGE without MISSING
+source env.sh            # both paths will say MISSING; that is the point
+./pull_images.sh
+source env.sh            # now neither should
 ```
+
+Run this **from a login node**, not from inside a job. It is a download, it
+needs no GPU, and a job's time limit can expire mid-transfer. The Boltz image
+is about 6 GB.
+
+`pull_images.sh` skips an image that is already there, clears the Apptainer
+cache afterwards, and prints what ended up inside. Pass `--force` to refresh.
+Use it rather than typing the pull by hand: the reason is in section 6.
 
 `BOLTZ_CACHE` is where model weights are stored, separately from the image. It
 lives in your home directory rather than the project area: the weights unpack
@@ -182,28 +173,41 @@ over the image. Building one source file beats re-pulling several gigabytes.
 To fix the image itself, re-run the container workflow on GitHub, then:
 
 ```bash
-apptainer cache clean -f
-apptainer pull --force $BOLTZ_IMAGE \
-    docker://ghcr.io/andreasdh/protein-structure-prediction/boltz:latest
+source env.sh
+./pull_images.sh --force
 ```
 
-`cache clean` before `pull` is what makes the second command fetch rather
-than reuse. `--force` overwrites the existing `.sif`.
+Use the script rather than typing the pull by hand. With `$BOLTZ_IMAGE`
+unset, `apptainer pull --force $BOLTZ_IMAGE docker://...` collapses to
+`apptainer pull --force docker://...`, which succeeds, invents its own
+filename, and leaves a multi-gigabyte `.sif` in whatever directory you were
+standing in. Nothing warns you, and the next command then fails somewhere
+else entirely. `pull_images.sh` runs under `set -u` and stops before
+downloading anything.
+
+It also pulls into a temporary name and moves it into place only on success,
+so an interrupted transfer cannot replace a working image with a half-written
+one, and it clears the Apptainer cache first. Without that, `pull` reports
+`Using cached SIF image` and hands back the old image, which looks exactly
+like a successful download.
 
 ---
 
 ## 7. Get OpenStructure
 
-`compare.py` computes lDDT itself, on CA atoms. OpenStructure is the reference
-implementation, and running both is how we show our own version is right.
-Pull it next to the Boltz image, from a login node:
+`pull_images.sh` in section 4 fetched this one too, so there is nothing more
+to do here. What it is for:
 
-```bash
-cd /fp/projects01/<your-project>/$USER/images
-apptainer pull ost.sif \
-    docker://registry.scicore.unibas.ch/schwede/openstructure:latest
-apptainer cache clean -f
-```
+`compare.py` computes lDDT itself, on CA atoms. OpenStructure is the reference
+implementation, and running both is how we show our own version is right. On
+lysozyme the two agree to a mean difference of 0.001, largest 0.003.
+
+OpenStructure's `--bb-lddt` uses CA atoms only for peptides, so it computes
+the same quantity as the version in `compare.py`. The gap to all-atom lDDT is
+side chains, and against a cryo-EM reference part of that gap is the
+reference's own uncertainty rather than the model's error. Which is why the
+backbone number is the one to report, and why it has to be named CA-lDDT or
+backbone lDDT rather than just lDDT.
 
 One image is one inode, so this adds nothing to the inode pressure.
 

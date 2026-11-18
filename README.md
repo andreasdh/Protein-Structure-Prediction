@@ -133,18 +133,15 @@ python3 compare.py --summary summary.csv --consistency --out consistency.csv
 installed. It additionally calls **OpenStructure**, the reference
 implementation, whenever that is available, and reports both.
 
-OpenStructure is distributed as a container. Pull it once from a login node and
-point an environment variable at it:
+OpenStructure is distributed as a container. On Fox, `./pull_images.sh` fetches
+it next to the Boltz image and `env.sh` sets `$OST_IMAGE`. Elsewhere, point
+that variable at the image yourself, or pass `--ost-image`.
 
-```bash
-cd /fp/projects01/<your-project>/$USER/images     # beside boltz.sif
-apptainer pull ost.sif \
-    docker://registry.scicore.unibas.ch/schwede/openstructure:latest
-echo "export OST_IMAGE=$PWD/ost.sif" >> ~/.bashrc  # or pass --ost-image
-```
-
-One image is one inode, so this does not add to the inode pressure on the
-project area.
+Neither implementation replaces the other. Both are computed, both are
+reported, and `lddt_source` records which ran. For the report, quote
+`lddt_ost_bb`: it is the reference implementation, so a reader can reproduce
+it. Numerically it makes no difference, which is the point of measuring the
+agreement.
 
 `compare.py` then adds these columns, and `lddt_source` records which
 implementations ran:

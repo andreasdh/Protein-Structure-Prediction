@@ -111,7 +111,9 @@ RUN pip list --format=freeze > /opt/versions.txt \
         print('torch', torch.__version__)" >> /opt/versions.txt \
     && echo "cuda_base nvidia/cuda:13.3.1-cudnn-runtime-ubuntu24.04" >> /opt/versions.txt \
     && echo "foldseek $(foldseek version 2>&1 | tail -1)" >> /opt/versions.txt \
-    && echo "USalign $(USalign -h 2>&1 | grep -oE 'version [0-9.]+' | head -1)" >> /opt/versions.txt
+    && echo "USalign $(USalign -h 2>&1 | grep -oiE 'version[: ]*[0-9]+' \
+         | head -1 || true) built $(date -u +%F) from \
+         zhanggroup.org/US-align/bin/module/USalign.cpp" >> /opt/versions.txt
 
 WORKDIR /work
 CMD ["boltz", "--help"]
