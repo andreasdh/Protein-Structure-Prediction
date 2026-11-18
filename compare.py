@@ -12,8 +12,19 @@ Usage:
         --config config.yaml --out comparison.csv --calibration calib.csv
     python3 compare.py --summary summary.csv --consistency --out consistency.csv
 
-TM-score is computed with US-align if it is on PATH. RMSD and lDDT are
-computed here, on CA atoms, so the script works with nothing installed.
+RMSD and lDDT are computed here, on CA atoms, so the script works with
+nothing installed. TM-score needs US-align and the reference lDDT needs
+OpenStructure, and both live in containers.
+
+RUN THIS SCRIPT OUTSIDE ANY CONTAINER. Apptainer cannot be run inside
+Apptainer, so from inside the Boltz image OpenStructure is unreachable. Run
+it outside, with numpy, pandas and pyyaml available, and set:
+
+    export BOLTZ_IMAGE=/projects/ecXXX/boltz.sif   # carries US-align
+    export OST_IMAGE=/projects/ecXXX/ost.sif       # carries OpenStructure
+
+It then reaches into each image as needed and you get every number in one
+pass. Each missing piece is reported rather than silently dropped.
 
 lDDT is additionally computed with OpenStructure, the reference
 implementation, whenever that is available: `ost` on PATH, or an Apptainer
@@ -178,16 +189,63 @@ def ca_lddt(model_xyz, ref_xyz, inclusion_radius=15.0,
     return per_res
 
 
-def us_align(model, ref, chain_m=None, chain_r=None):
-    """TM-score via US-align, normalised by the reference length. None if absent."""
-    exe = None
+_USALIGN_CMD = "unresolved"
+
+
+def usalign_command():
+    """How to invoke US-align here, or None. Resolved once and cached.
+
+      1. USalign, or TMalign, on PATH
+      2. apptainer exec $BOLTZ_IMAGE USalign, since the image built by
+         container/Dockerfile carries it at /usr/local/bin/USalign
+
+    Case (2) exists because Apptainer cannot be run inside Apptainer. Run
+    this script OUTSIDE any container and it reaches into each image as
+    needed: $BOLTZ_IMAGE for US-align, $OST_IMAGE for OpenStructure. Run it
+    inside the Boltz container and OpenStructure becomes unreachable, so
+    outside is the arrangement that gets you both in one pass.
+
+    Same binding caveat as OpenStructure: Apptainer binds $HOME and the
+    working directory, so keep models and reference under one of them.
+    """
+    global _USALIGN_CMD
+    if _USALIGN_CMD != "unresolved":
+        return _USALIGN_CMD
+
+    _USALIGN_CMD = None
     for cand in ("USalign", "US-align", "us-align", "TMalign"):
         if shutil.which(cand):
-            exe = cand
+            _USALIGN_CMD = [cand]
+            return _USALIGN_CMD
+
+    img = os.environ.get("BOLTZ_IMAGE")
+    if img and os.path.exists(img):
+        for runner in ("apptainer", "singularity"):
+            if not shutil.which(runner):
+                continue
+            # Confirm the binary is really in there rather than assuming it,
+            # so a missing one is reported now instead of silently dropping
+            # TM-score from every row.
+            for exe in ("USalign", "TMalign"):
+                try:
+                    p = subprocess.run([runner, "exec", img, exe, "-h"],
+                                       capture_output=True, text=True,
+                                       timeout=120)
+                except Exception:
+                    continue
+                if p.returncode == 0 or "Usage" in (p.stdout + p.stderr):
+                    _USALIGN_CMD = [runner, "exec", img, exe]
+                    return _USALIGN_CMD
             break
-    if exe is None:
+    return _USALIGN_CMD
+
+
+def us_align(model, ref, chain_m=None, chain_r=None):
+    """TM-score via US-align, normalised by the reference length. None if absent."""
+    base = usalign_command()
+    if base is None:
         return None
-    cmd = [exe, model, ref]
+    cmd = base + [model, ref]
     if chain_m:
         cmd += ["-chain1", chain_m]
     if chain_r:
@@ -675,9 +733,13 @@ def main():
         with open(args.config) as fh:
             cfg = yaml.safe_load(fh)
 
-    if shutil.which("USalign") is None and shutil.which("TMalign") is None:
-        print("note: US-align not on PATH, so TM-score is skipped. "
-              "RMSD and CA-lDDT still work.\n")
+    ua = usalign_command()
+    if ua is None:
+        print("note: US-align not found, so TM-score is skipped. Either put "
+              "USalign on PATH, or set $BOLTZ_IMAGE to the container, which "
+              "carries it. RMSD and CA-lDDT still work.\n")
+    elif len(ua) > 1:
+        print(f"TM-score: US-align via {' '.join(ua)}\n")
 
     if args.ost_image:
         os.environ["OST_IMAGE"] = args.ost_image

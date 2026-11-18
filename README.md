@@ -22,15 +22,27 @@ pip install numpy pandas pyyaml
 python3 selftest.py          # verify the pipeline works
 ```
 
-**US-align**, for TM-score, is already in the container at
-`/usr/local/bin/USalign`, so there is nothing to install. Run the analysis
-inside the container and it is found automatically. Outside it, the scripts
-fall back to RMSD and CA-lDDT and say so.
+RMSD and CA-lDDT are computed in the scripts themselves, so they work with
+nothing else installed. Two further tools live in containers: **US-align**, for
+TM-score, is in the Boltz image at `/usr/local/bin/USalign`, and
+**OpenStructure**, the reference implementation of lDDT, is its own image.
 
-**OpenStructure**, the reference implementation of lDDT, is a separate
-container and is used automatically when `$OST_IMAGE` points at it. See the
-lDDT section below for why both implementations are reported and which number
-belongs in the report.
+**Run `compare.py` outside any container.** Apptainer cannot be run inside
+Apptainer, so from inside the Boltz image OpenStructure is unreachable. Run it
+outside, point two variables at the images, and it reaches into each as needed:
+
+```bash
+export BOLTZ_IMAGE=/projects/ecXXX/boltz.sif   # carries US-align
+export OST_IMAGE=/projects/ecXXX/ost.sif       # carries OpenStructure
+```
+
+Anything missing is reported rather than silently dropped, and the startup
+lines say which route each tool was found by. Keep models and reference under
+`$HOME` or the working directory, since those are what Apptainer binds by
+default.
+
+See the lDDT section below for why both lDDT implementations are reported and
+which number belongs in the report.
 
 ## Before the first real run
 
