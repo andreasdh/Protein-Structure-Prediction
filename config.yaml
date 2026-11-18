@@ -116,7 +116,7 @@ run:
                           # with Ute is settled and compute nodes can reach it
 
 slurm:
-  account: ecXXX          # check with `projects`
+  account: ec12           # check with `projects`
   partition: accel        # check with `sinfo`
   gpus: 1
   cpus_per_task: 8

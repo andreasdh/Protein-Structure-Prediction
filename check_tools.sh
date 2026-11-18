@@ -273,21 +273,21 @@ status=$?
 note "6. Optional: the GPU path"
 
 cat <<'TXT'
-         Everything above tests the analysis chain. To test prediction too,
-         run one short job and feed its output through the same scripts:
+         Everything above tests the analysis chain. The prediction half is
+         one submission:
 
-           srun --account=ecXXX --partition=accel --gpus=1 --mem=32G \
-                --cpus-per-task=8 --time=00:40:00 --pty bash
-           # then, inside the job:
-           ./boltz_run.sh inputs/<something_small>.yaml results/
+           sbatch --account=<your-project> gpu_check.slurm
 
-           python3 collect.py --results results/ --out summary.csv
-           python3 compare.py --summary summary.csv --reference ref.cif \
-               --config config.yaml --calibration calib.csv --out comparison.csv
+         It builds the input from the reference you just used, predicts it,
+         scores it with these same scripts, and prints PASS or FAIL with the
+         reason. Submit it and walk away:
 
-         Use a short sequence first. A 130-residue protein takes a few
-         minutes; CCTX2 at 787 residues takes considerably longer, so do not
-         discover a typo on that one.
+           squeue -u $USER -o "%.18i %.9P %.20j %.8T %.10M %R"
+           tail -f logs/gpu_check-<jobid>.out
+
+         Do not use an interactive srun for this. The GPU queue can be long,
+         and an interactive session you are not watching when it finally
+         starts is a session that times out unused.
 TXT
 
 exit $status
