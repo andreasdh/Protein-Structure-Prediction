@@ -497,7 +497,8 @@ def construct_offset(cfg, construct):
 # ---------------------------------------------------------------------- modes
 
 def mode_reference(df, ref_path, ref_chain, cfg, calib_path,
-                   ost_cmd=None, ost_stereochecks=True, ost_off=False):
+                   ost_cmd=None, ost_stereochecks=True, ost_off=False,
+                   no_exclusions=False):
     rn, rx, _ = read_ca(ref_path, ref_chain)
     if rx is None:
         sys.exit(f"Could not read CA atoms from {ref_path}")
@@ -516,10 +517,27 @@ def mode_reference(df, ref_path, ref_chain, cfg, calib_path,
               "implementation.")
 
     doms = (cfg or {}).get("domains", {})
-    skip = excluded_residues(cfg)
-    if skip:
+    skip = set() if no_exclusions else excluded_residues(cfg)
+    if no_exclusions:
+        n_would = len(excluded_residues(cfg))
+        print(f"scoring EVERY residue: --no-exclusions was given, so the "
+              f"{n_would} residues in exclude_from_comparison are included.")
+        print("Label this run accordingly. It is the other half of the pair, "
+              "not the default.")
+    elif skip:
         print(f"excluding {len(skip)} residues from the comparison "
               f"(exclude_from_comparison in the config)")
+        # How much of each domain that removes, because a per-domain score
+        # over two thirds of a domain is a different quantity from one over
+        # all of it, and the figure belongs next to the number.
+        for name, (a, b) in sorted(doms.items(), key=lambda kv: kv[1][0]):
+            span = int(b) - int(a) + 1
+            n = sum(1 for r in range(int(a), int(b) + 1) if r in skip)
+            if n:
+                print(f"   {name:8s} {n:3d} of {span:3d} residues removed "
+                      f"({n / span:.1%})")
+        print("Run again with --no-exclusions and report both, as "
+              "config.yaml asks.")
     rows, calib_rows = [], []
 
     for _, r in df.iterrows():
@@ -748,6 +766,12 @@ def main():
     ap.add_argument("--calibration", default=None,
                     help="write per-residue pLDDT vs lDDT to this CSV")
     ap.add_argument("--out", default="comparison.csv")
+    ap.add_argument("--no-exclusions", action="store_true",
+                    help="score every residue, ignoring exclude_from_comparison. "
+                         "config.yaml asks for results both ways; this is "
+                         "how you get the second one without editing the "
+                         "config, which would break the link between a "
+                         "result and a commit")
     ap.add_argument("--no-openstructure", action="store_true",
                     help="skip OpenStructure even if it is available, and "
                          "report only the CA implementation")
@@ -793,7 +817,8 @@ def main():
         out = mode_reference(df, args.reference, ref_chain, cfg,
                              args.calibration, ost_cmd=ost_cmd,
                              ost_stereochecks=not args.ost_no_stereochecks,
-                             ost_off=args.no_openstructure)
+                             ost_off=args.no_openstructure,
+                             no_exclusions=args.no_exclusions)
         label = "accuracy against the reference"
     else:
         sys.exit("Give --reference REF or --consistency.")

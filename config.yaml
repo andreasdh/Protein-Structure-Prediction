@@ -40,6 +40,21 @@ domains:
 #
 # Report results both with and without this list: the difference is itself
 # informative, and a reader will want to know it was not cherry-picked.
+#
+#     python3 compare.py ... --out comparison.csv
+#     python3 compare.py ... --no-exclusions --out comparison.all.csv
+#
+# Use the flag rather than commenting out the list: editing the config to get
+# the second number breaks the link between a result and a commit, which is
+# the one thing provenance.sh exists to maintain.
+#
+# How much this removes per domain, which compare.py also prints:
+#   BTF1  11 of 150   7.3%
+#   BTF2   0 of 138      0%
+#   BTF3   6 of 136   4.4%
+#   BTF4  35 of 111  31.5%
+#   DUF   45 of 231  19.5%
+# BTF4 and DUF are the two where it changes what the number means.
 exclude_from_comparison:
   - [31, 35]      # paper 15-19,   BTF1 loop at sugar site alpha1
   - [40, 45]      # paper 24-29,   BTF1 loop supporting sugar site gamma1

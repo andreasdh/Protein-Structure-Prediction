@@ -111,12 +111,33 @@ fit. For that, read Appendix Table S4 and add 16.
 `PLACEHOLDER`. Fill them in and check them before any ligand run. Pick the
 negative control from a glycan the published array shows as non-binding.
 
-**Worth knowing before you read any per-domain score:** the
-`exclude_from_comparison` list removes 32% of BTF4 and a fifth of the DUF
-domain, because those regions are poorly resolved in the cryo-EM map. Report
-those two domains with and without the list. The difference is itself
-informative, and a reader will want to know the choice was not made after
-seeing the results.
+**Worth knowing before you read any per-domain score.** The
+`exclude_from_comparison` list drops the regions that are poorly resolved in
+the cryo-EM map. That is not a small correction:
+
+| Domain | Residues | Removed |
+| --- | --- | --- |
+| BTF1 | 150 | 11 (7.3%) |
+| BTF2 | 138 | 0 |
+| BTF3 | 136 | 6 (4.4%) |
+| BTF4 | 111 | 35 (31.5%) |
+| DUF | 231 | 45 (19.5%) |
+
+A score for BTF4 over 76 of its 111 residues is a different quantity from one
+over all 111, and the two can differ by a lot: on a synthetic case where the
+excluded region was the bad part, lDDT went from 0.97 to 0.69. So report both,
+and say which is which:
+
+```bash
+python3 compare.py --summary summary.csv --reference reference/9s11.cif \
+    --config config.yaml --out comparison.csv
+python3 compare.py --summary summary.csv --reference reference/9s11.cif \
+    --config config.yaml --no-exclusions --out comparison.all.csv
+```
+
+`compare.py` prints how much of each domain the list removes, so the figure
+sits next to the number rather than in this file. Decide which you lead with
+before you see them, not after.
 
 ## Typical run
 
