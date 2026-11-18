@@ -94,7 +94,7 @@ licence.
 ## The logbook
 
 `notes/logbook.md` is what actually makes the work transparent. The tools
-capture what ran. The logbook captures why.
+capture what ran, and the logbook captures why.
 
 One entry per run:
 
