@@ -22,11 +22,15 @@ pip install numpy pandas pyyaml
 python3 selftest.py          # verify the pipeline works
 ```
 
-Optional but recommended: put **US-align** on PATH for TM-score. Without it the
-scripts still compute RMSD and CA-lDDT, which cover most of what you need.
+**US-align**, for TM-score, is already in the container at
+`/usr/local/bin/USalign`, so there is nothing to install. Run the analysis
+inside the container and it is found automatically. Outside it, the scripts
+fall back to RMSD and CA-lDDT and say so.
 
-For anything going into a paper, use **OpenStructure** for lDDT rather than the
-CA-only version implemented here.
+**OpenStructure**, the reference implementation of lDDT, is a separate
+container and is used automatically when `$OST_IMAGE` points at it. See the
+lDDT section below for why both implementations are reported and which number
+belongs in the report.
 
 ## Before the first real run
 
